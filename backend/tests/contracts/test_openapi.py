@@ -2,6 +2,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app import main
+from app.api.ports import Services
 from app.config import get_settings
 from app.main import app
 
@@ -47,11 +49,60 @@ def test_fake_chat_and_actions(client):
     assert client.post("/api/actions/act-1/undo").json()["status"] == "undone"
 
 
-def test_unimplemented_returns_501(monkeypatch):
+def _real_mode(monkeypatch, services=None):
+    """USE_FAKES=0 with no MCP sources and an in-memory DB (never touches the real house)."""
     monkeypatch.setenv("USE_FAKES", "0")
+    monkeypatch.setenv("DB_PATH", ":memory:")
+    monkeypatch.setenv("SIM_MCP_URL", "")
+    monkeypatch.setenv("ALTICE_MCP_URL", "")
     get_settings.cache_clear()
+    if services is not None:
+
+        async def _build(_settings):
+            return services
+
+        monkeypatch.setattr(main, "build_real_services", _build)
+
+
+def test_unimplemented_returns_501(monkeypatch):
+    _real_mode(monkeypatch, main.unimplemented_services())
     with TestClient(app) as c:
         assert c.get("/api/devices").status_code == 501
+    get_settings.cache_clear()
+
+
+class _Raising:
+    """Service stub: get_device raises the exception it was built with."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def get_device(self, device_id: str):
+        raise self._exc
+
+
+@pytest.mark.parametrize(
+    ("exc", "status"),
+    [(KeyError("nope"), 404), (ValueError("not pending"), 409), (NotImplementedError(), 501)],
+)
+def test_service_errors_map_to_http_status(monkeypatch, exc, status):
+    u = main.unimplemented_services()
+    services = Services(devices=_Raising(exc), rooms=u.rooms, sim=u.sim, plugins=u.plugins,
+                        agent=u.agent, actions=u.actions, history=u.history)
+    _real_mode(monkeypatch, services)
+    with TestClient(app) as c:
+        assert c.get("/api/devices/nope").status_code == status
+    get_settings.cache_clear()
+
+
+def test_real_services_wired(monkeypatch):
+    pytest.importorskip("app.agent.wiring")
+    _real_mode(monkeypatch)
+    with TestClient(app) as c:
+        assert c.get("/api/devices").json() == []
+        assert c.get("/api/devices/nope").status_code == 404
+        assert c.post("/api/actions/nope/confirm").status_code == 404
+        assert c.get("/api/agent/status").status_code == 200
     get_settings.cache_clear()
 
 

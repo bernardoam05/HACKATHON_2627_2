@@ -57,9 +57,19 @@ Device/capability field names keep **Altice camelCase** on purpose.
 
 ### 5.5 REST API — `backend/app/api/`
 
-Routes only depend on service **Protocols** in `api/ports.py` (implemented by Team A). Unimplemented
-services raise `NotImplementedError` → handler returns **501**. `USE_FAKES=1` wires `api/fakes.py`
-(fixture-backed) so Team B can build the UI before Team A is ready.
+Routes only depend on service **Protocols** in `api/ports.py` (implemented by Team A). `USE_FAKES=1` wires `api/fakes.py`
+(fixture-backed) so Team B can build the UI before Team A is ready. Otherwise `main.py` builds the
+real services with Team A's `app.agent.wiring.build_services(settings)` (501 everywhere while that
+module does not exist) and runs its poller.
+
+Service errors map to HTTP status codes in `main.py` (body `{"detail": str}`):
+
+| Service raises | Status | Meaning |
+|---|---|---|
+| `NotImplementedError` | **501** | feature not implemented yet |
+| `KeyError(id)` | **404** | unknown device / room / action / insight / reflex / plugin type |
+| `ValueError` | **409** | conflicts with the current state (e.g. confirm/reject an action that is not pending, undo an action that was not executed, remove an Altice device, resume a reflex that is not paused) |
+| pydantic `ValidationError` | 500 | internal bug, never a client error |
 
 | Method | Path | Body → Response |
 |---|---|---|
