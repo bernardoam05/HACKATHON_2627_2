@@ -11,8 +11,10 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, ModelUnavailableError
 from pydantic_ai.models import Model
 
 from app.config import Settings
@@ -47,6 +49,33 @@ from .tools import AgentDeps, register_tools
 log = logging.getLogger(__name__)
 
 Broadcast = Callable[[BaseModel], Awaitable[None]]
+
+# Waits between attempts when the model provider fails transiently (503 overloaded, 429, network).
+LLM_RETRY_DELAYS: tuple[float, ...] = (2, 5, 15)
+MAX_RETRY_AFTER = 30.0  # honour the provider's Retry-After, but never block runs longer than this
+TRANSIENT_HTTP = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+
+def is_transient_llm_error(exc: BaseException) -> bool:
+    """Worth retrying: overloaded/rate-limited provider or network trouble.
+    Not retried: bad key (401/403), unknown model, invalid request, our own bugs."""
+    if isinstance(exc, ModelUnavailableError):
+        return True
+    if isinstance(exc, ModelHTTPError):
+        return exc.status_code in TRANSIENT_HTTP
+    if isinstance(exc, TimeoutError | ConnectionError | httpx.TransportError):
+        return True
+    if isinstance(exc, ModelAPIError):  # API error without an HTTP status: connection level
+        return True
+    return False
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    value = getattr(exc, "retry_after", None)
+    try:
+        return min(float(value), MAX_RETRY_AFTER) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 class WakeUp(BaseModel):
@@ -184,6 +213,7 @@ class HomeAgent:
         self._lock = asyncio.Lock()  # one LLM run at a time (state runs and chat)
         self._last_cutoff: datetime | None = None  # real UTC time of the last consumed change
         self._wake_reasons: list[str] = []
+        self.retry_delays: tuple[float, ...] = LLM_RETRY_DELAYS
         self._startup = False
         self.wakeups = WakeScheduler(self.clock, self.wake)
         self.scheduler: Any = None  # set by wiring, used for status()
@@ -255,13 +285,30 @@ class HomeAgent:
                 empty_after_seconds=self._settings.EMPTY_AFTER_MINUTES * 60,
             )
             try:
-                result = await self._agent.run(prompt, deps=deps)
+                result = await self._run_llm(prompt, deps)
             except BaseException:
                 self._wake_reasons = wake_reasons + self._wake_reasons  # retry them next run
                 raise
             decision = await self._finish(result.output, trigger, run_input)
             self._last_cutoff = cutoff
             return decision
+
+    async def _run_llm(self, prompt: str, deps: AgentDeps) -> Any:
+        """agent.run with retries on transient provider errors (503 overloaded, 429, network).
+        Runs stay serialised meanwhile; changes arriving during the wait set the scheduler's
+        dirty flag and are picked up by the next run (D5)."""
+        attempts = len(self.retry_delays) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._agent.run(prompt, deps=deps)
+            except Exception as e:
+                if attempt == attempts or not is_transient_llm_error(e):
+                    raise
+                delay = _retry_after(e) or self.retry_delays[attempt - 1]
+                log.warning("model %s unavailable (%s), retry %d/%d in %.0fs",
+                            self._model_name, type(e).__name__, attempt, attempts - 1, delay)
+                await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
 
     async def _initial_cutoff(self, cutoff: datetime) -> datetime:
         latest = await self._repo.latest_belief()
