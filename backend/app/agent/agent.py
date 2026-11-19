@@ -19,9 +19,11 @@ from pydantic_ai.exceptions import (
     ModelHTTPError,
     ModelQuotaExceededError,
     ModelUnavailableError,
+    UsageLimitExceeded,
 )
 from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
+from pydantic_ai.usage import UsageLimits
 
 from app.config import Settings
 from app.devices.registry import DeviceRegistry
@@ -58,6 +60,13 @@ Broadcast = Callable[[BaseModel], Awaitable[None]]
 
 # Waits between attempts when the model provider fails transiently (503 overloaded, 429, network).
 LLM_RETRY_DELAYS: tuple[float, ...] = (2, 5, 15)
+# Hard cap on model round-trips per run (tool calls + final answer). Without it a weak model can
+# loop on tools for minutes (seen: 19 calls / 352 s at startup) while the house waits.
+MAX_MODEL_REQUESTS = 6
+FORCE_ANSWER = (
+    "\n\nYou already used all your tool calls for this run. No tools are available now: "
+    "decide from the information above and return your decision immediately."
+)
 MAX_RETRY_AFTER = 30.0  # honour the provider's Retry-After, but never block runs longer than this
 TRANSIENT_HTTP = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
@@ -253,6 +262,15 @@ class HomeAgent:
             retries=2,
         )
         register_tools(self._agent)
+        # Same model and instructions, no tools: used when a run hits MAX_MODEL_REQUESTS, so the
+        # agent still decides instead of the run failing (one extra request).
+        self._final_agent: Agent[None, AgentOutput] = Agent(
+            model or build_model(settings.AGENT_MODEL),
+            output_type=AgentOutput,
+            instructions=instructions(settings.REFLEX_MIN_CONFIDENCE),
+            defer_model_check=True,
+            retries=1,
+        )
         self._lock = asyncio.Lock()  # one LLM run at a time (state runs and chat)
         self._last_cutoff: datetime | None = None  # real UTC time of the last consumed change
         self._wake_reasons: list[str] = []
@@ -278,8 +296,9 @@ class HomeAgent:
         """First run after the initial poll: full snapshot, check routines, schedule wake-ups."""
         self._startup = True
         await self.wake(
-            "The backend just started. Review the whole house; for plugs and other energy "
-            "devices call get_routine_stats and schedule wakeUps for routines you find."
+            "The backend just started. Call get_routine_stats once for each plug "
+            "(capability instantPower), schedule wakeUps for the routines you find, and answer. "
+            "Do not inspect other devices' history now."
         )
 
     async def wake(self, reason: str) -> None:
@@ -343,7 +362,17 @@ class HomeAgent:
         attempts = len(self.retry_delays) + 1
         for attempt in range(1, attempts + 1):
             try:
-                return await self._agent.run(prompt, deps=deps)
+                try:
+                    return await self._agent.run(
+                        prompt, deps=deps,
+                        usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS),
+                    )
+                except UsageLimitExceeded:
+                    log.warning("agent used %d model requests without deciding; asking for the "
+                                "decision now, without tools", MAX_MODEL_REQUESTS)
+                    return await self._final_agent.run(
+                        prompt + FORCE_ANSWER, usage_limits=UsageLimits(request_limit=2)
+                    )
             except Exception as e:
                 if attempt == attempts or not is_transient_llm_error(e):
                     raise

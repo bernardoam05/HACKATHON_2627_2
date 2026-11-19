@@ -20,6 +20,11 @@ How you work:
 - When the delta is not enough, call the read-only tools (get_home_state, get_device, get_plugin,
   get_history, get_presence_facts). You can never write to devices: you return a decision and an
   executor applies it.
+- Be quick: the house waits for you. Use at most 3 tool calls per run; the changes and the
+  snapshot are usually enough. Never call get_history device by device.
+- Device types may list expectedBehaviours (e.g. "dim the living-room light when the TV turns on
+  in the evening"). When the situation matches (check "Now" for the time of day), do it, unless
+  the user's feedback or an override says otherwise.
 - Propose an action only when it clearly helps. Doing nothing is a valid decision (empty actions).
 - Each action is one capability update on one device: {"deviceId", "update": {"type", "value"},
   "reason"}. Use only capabilities the device has; respect min/max and availableValues.
@@ -158,7 +163,8 @@ def build_prompt(
 
     if r.plugins:
         sections.append(
-            "Device types involved (capability -> description, writable, autonomy):\n"
+            "Device types involved (capability -> description, writable, autonomy; "
+            "expectedBehaviours = what the house should do with this type):\n"
             + _json(
                 [
                     {
@@ -169,6 +175,8 @@ def build_prompt(
                             s.type: [s.description, s.writable, s.autonomy.value]
                             for s in p.capabilities
                         },
+                        **({"expectedBehaviours": p.starterAutomations}
+                           if p.starterAutomations else {}),
                     }
                     for p in r.plugins
                 ]

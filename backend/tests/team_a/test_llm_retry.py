@@ -10,7 +10,13 @@ from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from test_devices_poller import fake_server, sim_devices
 
-from app.agent.agent import AUTO_MODELS, build_model, is_transient_llm_error, model_names
+from app.agent.agent import (
+    AUTO_MODELS,
+    MAX_MODEL_REQUESTS,
+    build_model,
+    is_transient_llm_error,
+    model_names,
+)
 from app.agent.wiring import build_services, export_agent_api_key
 from app.config import Settings
 from app.mcp_clients.sim import SimClient
@@ -116,3 +122,37 @@ def test_exported_key_for_auto(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY")
     assert export_agent_api_key(Settings(AGENT_MODEL="auto", AGENT_API_KEY="k")) == "GEMINI_API_KEY"
     assert os.environ["GEMINI_API_KEY"] == "k"
+
+
+# --- a model that loops on tools still ends with a decision -----------------------------------
+
+
+class ToolLooper:
+    """Calls get_home_state forever while tools exist; decides once none are offered."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def __call__(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        self.calls += 1
+        for m in messages:
+            for p in getattr(m, "parts", []):
+                if getattr(p, "part_kind", "") == "user-prompt" and isinstance(p.content, str):
+                    self.prompts.append(p.content)
+        if info.function_tools:
+            return ModelResponse(parts=[ToolCallPart("get_home_state", {})])
+        out = {"explanation": "Baixei a luz porque a TV ligou.", "beliefState": "tv",
+               "actions": [{"deviceId": "lamp1", "update": {"type": "brightness", "value": 30}}]}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, json.dumps(out))])
+
+
+async def test_tool_loop_is_cut_and_the_agent_still_decides():
+    looper = ToolLooper()
+    decisions, _ = await run_once(Flaky(0, RuntimeError()), model=FunctionModel(looper))
+    assert len(decisions) == 1 and decisions[0].actions[0].update.value == 30
+    assert looper.calls == MAX_MODEL_REQUESTS + 1  # capped run + one forced answer, no tools
+    assert "No tools are available now" in looper.prompts[-1]
+    # plugin starterAutomations reach the prompt as expectedBehaviours
+    assert "expectedBehaviours" in looper.prompts[0]
+    assert "Baixar a luz" in looper.prompts[0]
