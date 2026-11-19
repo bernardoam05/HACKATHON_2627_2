@@ -161,6 +161,30 @@ def test_add_and_remove_device(world: World) -> None:
         world.add_device("toaster", "Torradeira")
 
 
+def test_add_device_overrides_are_normalised(world: World) -> None:
+    dev = world.add_device("tv", "TV do quarto", capabilities=[
+        {"type": "power", "value": True},
+        {"type": "volume", "value": 40, "max": 50},
+    ])
+    assert cap(dev, "power") == "on"
+    assert next(c for c in dev["capabilities"] if c["type"] == "volume")["max"] == 50
+    Device.model_validate(dev)
+
+
+@pytest.mark.parametrize("override, match", [
+    ({"type": "power", "value": "maybe"}, "not in"),
+    ({"type": "volume", "value": 101}, "out of range"),
+    ({"type": "volume", "max": 10}, "out of range"),  # current value 20 no longer fits
+    ({"value": 1}, "needs a 'type'"),
+    ({"type": "volume", "colour": "red"}, "unknown fields"),
+])
+def test_add_device_rejects_bad_overrides(world: World, override: dict, match: str) -> None:
+    before = {d["id"] for d in world.list_devices()}
+    with pytest.raises(SimError, match=match):
+        world.add_device("tv", "TV", capabilities=[override])
+    assert {d["id"] for d in world.list_devices()} == before
+
+
 def test_list_templates(world: World) -> None:
     ids = {t["id"] for t in world.list_templates()}
     assert ids >= {"tv", "coffee_plug", "bulb", "contactSensor", "motionSensor"}

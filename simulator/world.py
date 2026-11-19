@@ -254,13 +254,7 @@ class World:
             raise SimError(f"device {device_id!r} already exists")
         caps = copy.deepcopy(tpl["capabilities"])
         for override in capabilities or []:
-            if "type" not in override:
-                raise SimError(f"capability override without 'type': {override!r}")
-            existing = next((c for c in caps if c["type"] == override["type"]), None)
-            if existing is None:
-                caps.append({"name": "", **override})
-            else:
-                existing.update(override)
+            _apply_override(caps, override)
         now_ms = self._now_ms()
         return SimDevice(
             id=device_id,
@@ -336,6 +330,35 @@ class World:
 
 
 # --- value validation ----------------------------------------------------------
+_OVERRIDE_META = ("availableValues", "min", "max")
+
+
+def _apply_override(caps: list[dict[str, Any]], override: dict[str, Any]) -> None:
+    """Merge one sim_add_device capability override, keeping the Altice format valid.
+
+    Metadata (availableValues/min/max) is applied first, then the value (given or current)
+    is validated against it with the same friendly spellings as sim_set_state, so
+    {"type": "power", "value": true} is stored as "on" and out-of-range values are refused.
+    """
+    cap_type = override.get("type")
+    if not isinstance(cap_type, str) or not cap_type:
+        raise SimError(f"capability override needs a 'type': {override!r}")
+    unknown = set(override) - {"type", "name", "value", *_OVERRIDE_META}
+    if unknown:
+        raise SimError(f"capability override {cap_type!r} has unknown fields {sorted(unknown)}")
+    cap = next((c for c in caps if c["type"] == cap_type), None)
+    if cap is None:
+        cap = {"name": "", "type": cap_type, "value": None}
+        caps.append(cap)
+    for key in _OVERRIDE_META:
+        if key in override:
+            cap[key] = copy.deepcopy(override[key])
+    value = override.get("value", cap["value"])
+    if value is not None:
+        cap["value"] = _lenient_value(cap, value)
+
+
+
 def _is_number(v: Any) -> bool:
     return isinstance(v, int | float) and not isinstance(v, bool)
 
