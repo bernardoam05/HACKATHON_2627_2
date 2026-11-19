@@ -2,21 +2,26 @@ name: s4
 description: Door opened/closed then no motion for EMPTY_AFTER_MINUTES -> propose off, temperature, arm alarm
 now_override: null
 backend_env: {EMPTY_AFTER_MINUTES: 0.5}   # 30 s of no motion after the door closes = empty (D14)
-# Needs a room marked "É a entrada da casa" (isEntrance) holding sim-porta-entrada (Gestor tab).
+# The front door must sit in a room marked as the entrance (D14): backend_setup does it (same as
+# "É a entrada da casa" in the Gestor tab).
+backend_setup:
+  rooms:
+    - {name: Entrada, isEntrance: true, devices: [sim-porta-entrada]}
 devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
+# Door values as the real Altice contact sensor reports them: "alarm" = open, "normal" = closed.
 state:        # applied by sim_load_scenario after the reset, as physical events
   sim-luz-sala: {power: "on", brightness: 70}
   sim-luz-cozinha: {power: "on", brightness: 70}
   sim-tv-sala: {power: "on"}
-  sim-porta-entrada: {sensorState: "closed"}
+  sim-porta-entrada: {sensorState: "normal"}
   sim-movimento-sala: {motionDetected: false}
 steps:
   - {wait: 3, say: "A pessoa desliga a televisão e vai para a porta.",
      set: {device: sim-tv-sala, capability: power, value: "off"}}
   - {wait: 2, say: "Abre a porta de entrada…",
-     set: {device: sim-porta-entrada, capability: sensorState, value: "open"}}
+     set: {device: sim-porta-entrada, capability: sensorState, value: "alarm"}}
   - {wait: 3, say: "…e fecha-a. A partir daqui não há movimento em casa.",
-     set: {device: sim-porta-entrada, capability: sensorState, value: "closed"}}
+     set: {device: sim-porta-entrada, capability: sensorState, value: "normal"}}
 expect:
   # Lights are auto_notify: switched off with an Undo in the activity feed.
   - {say: "A luz da sala apaga", device: sim-luz-sala, capability: power, value: "off", within: 120}

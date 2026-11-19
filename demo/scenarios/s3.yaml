@@ -1,8 +1,14 @@
 name: s3
 description: Coffee routine learned from seeded plug history -> plug on shortly before usual time
-# Before: python demo/seed_history.py, then in backend/:
-#   uv run python -m app.storage.import_seed ../demo/seed/history.jsonl --align-to-today
-# Friday 07:20, ten minutes before the usual ~07:30 coffee.
+# The agent finds the routine in its startup run, so the backend must start AFTER the state is
+# loaded (a reset afterwards would undo the agent's action and count as a user override):
+#   1. python demo/seed_history.py, then in backend/:
+#        uv run python -m app.storage.import_seed ../demo/seed/history.jsonl --align-to-today
+#   2. cd simulator && uv run python ../demo/run_scenario.py s3 --load-only
+#   3. start the backend with NOW_OVERRIDE below
+#   4. cd simulator && uv run python ../demo/run_scenario.py s3 --skip-load
+# Friday 07:20, about ten minutes before the usual ~07:30 coffee: the agent proposes a daily
+# schedule (to confirm in "Aprendizagem") and covers today with a wake-up a few minutes before.
 now_override: "2026-11-20T07:20:00"
 devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
 state:        # applied by sim_load_scenario after the reset, as physical events
@@ -10,6 +16,6 @@ state:        # applied by sim_load_scenario after the reset, as physical events
 steps:
   - {wait: 2, say: "São 07:20 de um dia útil. Ninguém toca na máquina de café."}
 expect:
-  # auto + notify: the plug is switched on by the agent before the usual time.
-  - {say: "A máquina de café liga sozinha", device: sim-cafe-cozinha, capability: power, value: "on", within: 180}
-  - {say: "Está a aquecer", device: sim-cafe-cozinha, capability: instantPower, op: ">", value: 100, within: 180}
+  # auto + notify: the plug is switched on by the agent a few minutes before the usual ~07:30.
+  - {say: "A máquina de café liga sozinha", device: sim-cafe-cozinha, capability: power, value: "on", within: 660}
+  - {say: "Está a aquecer", device: sim-cafe-cozinha, capability: instantPower, op: ">", value: 100, within: 660}

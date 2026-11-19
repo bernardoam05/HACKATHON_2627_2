@@ -2,15 +2,25 @@
 
 # Owner: Team B
 Loads demo/scenarios/<name>.yaml, calls sim_load_scenario, then replays the steps via sim_set_state.
-Never calls Altice write tools: it only talks to the simulator MCP (SIM_MCP_URL) and reads the
-backend REST API.
+Never calls Altice write tools: it only talks to the simulator MCP (SIM_MCP_URL) and to the backend
+REST API (reads, plus rooms / device assignment / cooldowns for the scenario setup).
 
 Run from the simulator environment (it has mcp + pyyaml):
     cd simulator && uv run python ../demo/run_scenario.py s1 [--no-check] [--speed 2]
 
+Scenarios that need the backend's startup run (S3: routines) must load the state BEFORE the
+backend starts, otherwise the reset undoes what the agent just did (read as a user override):
+    uv run python ../demo/run_scenario.py s3 --load-only     # 1. start state
+    (start the backend with the scenario's env)              # 2. startup run sees that state
+    uv run python ../demo/run_scenario.py s3 --skip-load     # 3. play + check
+
 Scenario file (demo/scenarios/sN.yaml):
-    devices / state      start state, applied by sim_load_scenario (see simulator/world.py)
+    devices / state      start state, applied by sim_load_scenario (see simulator/world.py);
+                         with a running backend, cooldowns the reset causes on these devices are
+                         lifted right after loading
     backend_env          env the backend should be started with (printed as a reminder)
+    backend_setup:       done through the backend REST API before the steps
+      rooms: [{name, isEntrance?, devices: [ids]}]   rooms created if missing, devices assigned
     steps:               in order; each step may have `say`, `wait` (seconds, before the action)
                          and one action:
       - set: {device, capability, value}            physical event (sim_set_state)
@@ -72,6 +82,52 @@ def backend_get(path: str) -> Any:
         return None
 
 
+def backend_send(method: str, path: str, body: Any = None) -> Any:
+    """Backend REST only (rooms, device assignment, cooldowns): never an Altice write tool."""
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(f"{BACKEND_URL}{path}", data=data, method=method,
+                                 headers={"Content-Type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as res:
+            raw = res.read().decode("utf-8")
+            return json.loads(raw) if raw else True
+    except urllib.error.HTTPError as e:
+        raise ScenarioError(f"backend {method} {path} -> {e.code}") from e
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise ScenarioError(f"backend not reachable at {BACKEND_URL}: {e}") from e
+
+
+def setup_backend(spec: dict[str, Any]) -> None:
+    """`backend_setup.rooms`: [{name, isEntrance, devices: [ids]}] -> rooms (ours, D11) created if
+    missing and devices assigned to them, e.g. the entrance room holding the front door (D14)."""
+    rooms = (spec.get("backend_setup") or {}).get("rooms") or []
+    if not rooms:
+        return
+    existing = {r["name"]: r for r in backend_get("/api/rooms") or []}
+    for room in rooms:
+        r = existing.get(room["name"]) or backend_send(
+            "POST", "/api/rooms", {"name": room["name"], "isEntrance": bool(room.get("isEntrance"))})
+        for device_id in room.get("devices") or []:
+            backend_send("PATCH", f"/api/devices/{device_id}", {"roomId": r["id"]})
+        say(f"divisão '{room['name']}'" + (" (entrada)" if room.get("isEntrance") else "")
+            + f" com {len(room.get('devices') or [])} dispositivo(s)")
+
+
+async def clear_reset_cooldowns(spec: dict[str, Any]) -> None:
+    """Loading the start state is applied as physical events; if the agent had acted on those
+    devices just before, the backend reads the reset as a user override (D9) and blocks them.
+    Wait one poll, then lift those blocks so the scenario starts clean."""
+    devices = list((spec.get("state") or {}).keys())
+    if not devices or backend_get("/api/agent/status") is None:
+        return
+    await asyncio.sleep(3)
+    for device_id in devices:
+        try:
+            backend_send("DELETE", f"/api/cooldowns/{device_id}")
+        except ScenarioError:
+            pass  # unknown device or older backend without cooldowns: nothing to lift
+
+
 def say(text: str) -> None:
     print(f"  {text}", flush=True)
 
@@ -112,7 +168,9 @@ async def check(sim: Sim, e: dict[str, Any]) -> tuple[bool, str]:
     return compare(value, e.get("op", "="), e["value"]), f"valor atual {value!r}"
 
 
-async def run(name: str, do_check: bool, speed: float) -> bool:
+async def run(name: str, do_check: bool, speed: float, load: str = "auto") -> bool:
+    """`load`: "auto" (load the start state, lift reset cooldowns, play), "only" (load the start
+    state and stop: start the backend afterwards), "skip" (state already loaded: just play)."""
     path = SCENARIOS / f"{name}.yaml"
     if not path.is_file():
         raise ScenarioError(f"no scenario {path}")
@@ -127,8 +185,15 @@ async def run(name: str, do_check: bool, speed: float) -> bool:
 
     async with Client(SIM_URL) as client:
         sim = Sim(client)
-        await sim.call("sim_load_scenario", {"name": name})
-        say("estado inicial carregado no simulador")
+        if load != "skip":
+            await sim.call("sim_load_scenario", {"name": name})
+            say("estado inicial carregado no simulador")
+        if load == "only":
+            print("== ESTADO CARREGADO: arranca agora o backend e depois corre com --skip-load")
+            return True
+        setup_backend(spec)
+        if load == "auto":
+            await clear_reset_cooldowns(spec)
 
         for step in spec.get("steps") or []:
             if step.get("wait"):
@@ -171,18 +236,30 @@ async def run(name: str, do_check: bool, speed: float) -> bool:
     return all(ok or expectations[i].get("optional") for i, (ok, _) in results.items())
 
 
+def _first_leaf(exc: BaseException) -> BaseException:
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Run a demo scenario against the simulator.")
     p.add_argument("name", nargs="?", default="s1")
     p.add_argument("--no-check", action="store_true", help="only play the steps")
     p.add_argument("--speed", type=float, default=1.0, help="divide waits and timeouts by this")
+    order = p.add_mutually_exclusive_group()
+    order.add_argument("--load-only", action="store_true",
+                       help="load the start state and stop (then start the backend)")
+    order.add_argument("--skip-load", action="store_true",
+                       help="the start state is already loaded: only play the steps")
     a = p.parse_args()
+    load = "only" if a.load_only else "skip" if a.skip_load else "auto"
     try:
-        ok = asyncio.run(run(a.name, not a.no_check, a.speed))
-    except ScenarioError as e:
-        print(f"erro: {e}", file=sys.stderr)
+        ok = asyncio.run(run(a.name, not a.no_check, a.speed, load))
+    except* ScenarioError as group:  # raised inside the MCP session it arrives wrapped in a group
+        print(f"erro: {_first_leaf(group)}", file=sys.stderr)
         sys.exit(2)
-    if not a.no_check:
+    if not a.no_check and load != "only":
         print("== PASSOU" if ok else "== FALHOU")
     sys.exit(0 if ok else 1)
 
