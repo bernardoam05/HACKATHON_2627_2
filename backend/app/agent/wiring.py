@@ -58,7 +58,13 @@ async def build_services(
     insights = InsightEngine(
         repo, broadcast, settings.INSIGHT_MIN_CONFIDENCE, settings.REFLEX_MAX_UNDOS
     )
-    feedback = FeedbackService(repo, insights, broadcast)
+    feedback = FeedbackService(
+        repo, insights, broadcast,
+        default_minutes=settings.OVERRIDE_COOLDOWN_MINUTES,
+        override_window_minutes=settings.OVERRIDE_WINDOW_MINUTES,
+        device_check=registry.get_device,
+    )
+    await feedback.load()
     executor = Executor(registry, repo, plugins, broadcast, feedback)
     registry.manual_handler = executor.manual
     reflexes = ReflexEngine(
@@ -99,10 +105,12 @@ async def build_services(
         agent=agent,
         actions=executor,
         history=repo,
+        cooldowns=feedback,
     )
 
     async def aclose() -> None:
         presence.cancel()
+        feedback.close()
         agent.wakeups.cancel_all()
         await scheduler.stop()
         for c in clients.values():

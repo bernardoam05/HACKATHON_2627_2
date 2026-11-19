@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.schemas import (
     ActionRecord,
     Decision,
+    DeviceCooldown,
     DevicePlugin,
     Insight,
     Reflex,
@@ -355,5 +356,32 @@ class Repository:
         await self._db.execute(
             "INSERT INTO reflex_executions(ts, reflex_id, action_ids) VALUES (?, ?, ?)",
             (ts(at), reflex_id, json.dumps(action_ids)),
+        )
+        await self._db.commit()
+
+    # --- cooldowns (D9) ---------------------------------------------------------------------
+
+    async def save_cooldown(self, c: DeviceCooldown) -> None:
+        await self._db.execute(
+            "INSERT OR REPLACE INTO device_cooldowns(device_id, data) VALUES (?, ?)",
+            (c.deviceId, c.model_dump_json()),
+        )
+        await self._db.commit()
+
+    async def delete_cooldown(self, device_id: str) -> None:
+        await self._db.execute("DELETE FROM device_cooldowns WHERE device_id = ?", (device_id,))
+        await self._db.commit()
+
+    async def list_cooldowns(self) -> list[DeviceCooldown]:
+        return await self._rows(DeviceCooldown, "SELECT data FROM device_cooldowns")
+
+    async def cooldown_defaults(self) -> dict[str, float]:
+        async with self._db.execute("SELECT device_id, minutes FROM cooldown_defaults") as cur:
+            return {r["device_id"]: float(r["minutes"]) for r in await cur.fetchall()}
+
+    async def set_cooldown_default(self, device_id: str, minutes: float) -> None:
+        await self._db.execute(
+            "INSERT OR REPLACE INTO cooldown_defaults(device_id, minutes) VALUES (?, ?)",
+            (device_id, minutes),
         )
         await self._db.commit()
