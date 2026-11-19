@@ -138,6 +138,11 @@ async def entrance_door_ids(registry: DeviceRegistry, rooms: list[Room]) -> set[
     }
 
 
+def _room(dev: Any) -> str | None:
+    """Our room assignment, else the room name the source reports (sim/Altice)."""
+    return (dev.roomId or dev.roomName) if dev is not None else None
+
+
 async def compute_presence_facts(
     registry: DeviceRegistry, repo: Repository, empty_after_seconds: float, lookback_hours: float = 12
 ) -> PresenceFacts:
@@ -154,12 +159,11 @@ async def compute_presence_facts(
         if c.deviceId in doors and c.capability in DOOR_CAPABILITIES:
             opened = door_is_open(c.capability, c.new)
             if opened:
-                last_door = DoorEvent(deviceId=c.deviceId, roomId=dev.roomId if dev else None,
-                                      openedAt=c.at)
+                last_door = DoorEvent(deviceId=c.deviceId, roomId=_room(dev), openedAt=c.at)
             elif opened is False and last_door is not None and last_door.closedAt is None:
                 last_door.closedAt = c.at
         elif c.capability == MOTION_CAPABILITY and dev is not None and is_motion(c.new):
-            last_motion[c.deviceId] = RoomMotion(roomId=dev.roomId, deviceId=c.deviceId, at=c.at)
+            last_motion[c.deviceId] = RoomMotion(roomId=_room(dev), deviceId=c.deviceId, at=c.at)
 
     motions = sorted(last_motion.values(), key=lambda m: m.at)
     door_at = (last_door.closedAt or last_door.openedAt) if last_door else None
