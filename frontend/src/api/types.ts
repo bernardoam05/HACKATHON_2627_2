@@ -154,13 +154,25 @@ export interface InsightUpdate {
 
 export interface TimeWindow { from: string; to: string; weekdays?: number[] | null }
 
+/**
+ * kind "state" (default): a device change (deviceId + capability + operator/value).
+ * kind "time": every day at `at` (house time, "HH:MM"), optionally only on `weekdays` (0 = Monday).
+ * kind "first_motion": `delayMinutes` after the first motion of the day, optionally on `weekdays`.
+ * deviceId/capability are "" for time/first_motion triggers.
+ */
+export type ReflexTriggerKind = "state" | "time" | "first_motion";
+
 export interface ReflexTrigger {
+  kind?: ReflexTriggerKind;
   deviceId: string;
   capability: string;
   operator: "=" | "<" | ">" | "changed";
   value?: number | string | boolean | null;
   roomId?: string | null;
   timeWindow?: TimeWindow | null;
+  at?: string | null;
+  weekdays?: number[] | null;
+  delayMinutes?: number | null;
 }
 
 export type ReflexStatus = "proposed" | "active" | "paused" | "deleted";
@@ -176,6 +188,15 @@ export interface Reflex {
   createdAt: ISODate;
   executions: number;
   undos: number;
+  lastFiredAt?: ISODate | null;
+}
+
+/** POST /api/reflexes: a schedule/automation created by the user (active at once). */
+export interface ReflexCreate {
+  name: string;
+  triggers: ReflexTrigger[];
+  triggerLogic?: "all" | "any";
+  actions: ProposedAction[];
 }
 
 export interface ReflexProposal { reflex: Reflex; rationale: string }

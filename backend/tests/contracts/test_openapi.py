@@ -20,7 +20,7 @@ EXPECTED = {
     ("get", "/api/agent/status"), ("get", "/api/insights"), ("delete", "/api/insights/{insight_id}"),
     ("get", "/api/reflexes"), ("post", "/api/reflexes/{reflex_id}/confirm"),
     ("post", "/api/reflexes/{reflex_id}/pause"), ("post", "/api/reflexes/{reflex_id}/resume"),
-    ("delete", "/api/reflexes/{reflex_id}"),
+    ("delete", "/api/reflexes/{reflex_id}"), ("post", "/api/reflexes"),
     ("get", "/api/cooldowns"), ("put", "/api/cooldowns/{device_id}"),
     ("delete", "/api/cooldowns/{device_id}"),
 }
@@ -106,6 +106,20 @@ def test_real_services_wired(monkeypatch):
         assert c.post("/api/actions/nope/confirm").status_code == 404
         assert c.get("/api/agent/status").status_code == 200
     get_settings.cache_clear()
+
+
+def test_fake_create_scheduled_reflex(client):
+    dev = client.get("/api/devices").json()[0]["id"]
+    body = {"name": "Acordar com luz",
+            "triggers": [{"kind": "time", "at": "07:30", "weekdays": [0, 1, 2, 3, 4]}],
+            "actions": [{"deviceId": dev, "update": {"type": "power", "value": "on"}}]}
+    r = client.post("/api/reflexes", json=body)
+    assert r.status_code == 200 and r.json()["status"] == "active"
+    assert r.json()["triggers"][0]["kind"] == "time" and r.json()["triggers"][0]["deviceId"] == ""
+    bad = {**body, "triggers": [{"kind": "time", "at": "7h30"}]}
+    assert client.post("/api/reflexes", json=bad).status_code == 422
+    unknown = {**body, "actions": [{"deviceId": "nope", "update": {"type": "power", "value": "on"}}]}
+    assert client.post("/api/reflexes", json=unknown).status_code == 404
 
 
 def test_fake_cooldowns_options(client):

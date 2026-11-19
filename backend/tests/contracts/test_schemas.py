@@ -14,6 +14,8 @@ from app.schemas import (
     DevicePlugin,
     DevicePurpose,
     PresenceFacts,
+    ReflexCreate,
+    ReflexTrigger,
     StateChangedMsg,
     WsMessage,
 )
@@ -53,6 +55,22 @@ def test_ws_discriminated_union():
     msg = TypeAdapter(WsMessage).validate_python({"type": "agent_status", "busy": True, "dirty": False})
     assert msg.type == "agent_status"
     assert StateChangedMsg(changes=[]).type == "state_changed"
+
+
+def test_reflex_trigger_kinds():
+    old = ReflexTrigger.model_validate(
+        {"deviceId": "m", "capability": "motionDetected", "operator": "=", "value": True})
+    assert old.kind == "state"  # existing reflexes keep working
+    t = ReflexTrigger(kind="time", at="07:30", weekdays=[0, 1, 2, 3, 4])
+    assert t.deviceId == "" and t.capability == ""
+    assert ReflexTrigger(kind="first_motion", delayMinutes=30).delayMinutes == 30
+    for bad in ({"kind": "state"}, {"kind": "time"}, {"kind": "time", "at": "24:00"},
+                {"kind": "time", "at": "07:30", "weekdays": [7]},
+                {"kind": "first_motion", "delayMinutes": -1}):
+        with pytest.raises(ValidationError):
+            ReflexTrigger.model_validate(bad)
+    with pytest.raises(ValidationError):
+        ReflexCreate(name="x", triggers=[], actions=[])
 
 
 def test_cooldown_contract():

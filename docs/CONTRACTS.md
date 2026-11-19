@@ -50,8 +50,13 @@ Device/capability field names keep **Altice camelCase** on purpose.
 - `Decision {id, createdAt, trigger: state_change | chat | startup | reflex_report, explanation (user-facing, PT-PT), inferredRoom?, inferredActivity?, actions: ProposedAction[], confidence: 0..1, beliefState: str (≤ ~800 chars, agent-written), insightUpdates: InsightUpdate[], reflexProposals: ReflexProposal[], reflexUpdates: ReflexUpdate[]}`
 - `Insight {id, statement, confidence: 0..1, evidence: str[] (change/action/feedback ids), createdAt, lastConfirmedAt, status: active | dropped}`
 - `InsightUpdate {op: create | reinforce | weaken | delete, insightId?, statement?, delta?: float, evidence?: str[]}`
-- `ReflexTrigger {deviceId, capability, operator: "=" | "<" | ">" | "changed", value?, roomId?, timeWindow?: {from: "HH:MM", to: "HH:MM", weekdays?: int[]}}`
-- `Reflex {id, name, triggers: ReflexTrigger[], triggerLogic: all | any, actions: ProposedAction[], sourceInsightId, status: proposed | active | paused | deleted, createdAt, executions: int, undos: int}`
+- `ReflexTrigger {kind: state | time | first_motion = state, deviceId = "", capability = "", operator: "=" | "<" | ">" | "changed" = "=", value?, roomId?, timeWindow?: {from: "HH:MM", to: "HH:MM", weekdays?: int[]}, at?: "HH:MM", weekdays?: int[] (0 = Monday), delayMinutes?: 0..720}`:
+  - `state`: fires on a device change (needs `deviceId` + `capability`);
+  - `time`: every day at `at` (house time), only on `weekdays` if given (e.g. "07:30, Mon-Fri -> bedroom light on");
+  - `first_motion`: `delayMinutes` after the first motion of the house day (e.g. "30 min after waking up -> coffee machine on");
+  - in an `all` reflex, `state` triggers next to a time trigger are conditions on the current state.
+- `Reflex {id, name, triggers: ReflexTrigger[], triggerLogic: all | any, actions: ProposedAction[], sourceInsightId, status: proposed | active | paused | deleted, createdAt, executions: int, undos: int, lastFiredAt?}`: scheduled reflexes fire at most once per house day, without the LLM, and never perform a `suggest` action (D16)
+- `ReflexCreate {name, triggers: ReflexTrigger[] (>= 1), triggerLogic = all, actions: ProposedAction[] (>= 1)}`: user-created, active at once
 - `ReflexProposal {reflex: Reflex (status=proposed), rationale}`, `ReflexUpdate {reflexId, op: pause | resume | delete | modify, reflex?: Reflex, reason}`
 - `AgentRunInput {mode: delta | full, snapshot?: StateSnapshot (only when mode=full), changesSinceLastRun: StateChange[] (includes reflex executions), beliefState?: str, insights: Insight[] (top N), recentActions: ActionRecord[], feedback: UserFeedback[], rooms: Room[], plugins: DevicePlugin[] (only for devices in the changes when mode=delta), now}`
 - `ChatRequest {message, inputMode: text | voice}`, `ChatResponse {reply, decision?}`
@@ -101,6 +106,7 @@ Service errors map to HTTP status codes in `main.py` (body `{"detail": str}`):
 | GET | `/api/insights` | → `Insight[]` (active, sorted by confidence) |
 | DELETE | `/api/insights/{id}` | → 204 (user removes something the house "learned") |
 | GET | `/api/reflexes?status=` | → `Reflex[]` |
+| POST | `/api/reflexes` | `ReflexCreate` → `Reflex` (status=active; user-created schedule/automation; 409 if an action needs confirmation or the capability does not exist, 404 for an unknown device, 422 for an invalid trigger) |
 | POST | `/api/reflexes/{id}/confirm` · `/pause` · `/resume` | → `Reflex` |
 | DELETE | `/api/reflexes/{id}` | → 204 |
 
