@@ -40,6 +40,7 @@ export function errorMessage(e: unknown): string {
     if (e.status === 404) return "Isto já não existe. Atualiza a página.";
     // 409: the backend explains the conflict (e.g. action no longer pending); its detail is in English.
     if (e.status === 409) return "Isto já mudou entretanto. Atualiza para ver o estado atual.";
+    if (e.status === 422) return "Essa opção não é válida.";
     if (e.status >= 500) return "O servidor teve um problema. Tenta outra vez.";
     return e.detail ?? `Pedido recusado (${e.status}).`;
   }

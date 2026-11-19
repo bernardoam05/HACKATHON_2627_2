@@ -1,7 +1,7 @@
 // Owner: Team B. Thin typed REST client for backend/app/api.
 import type {
-  ActionRecord, AgentStatus, CapabilityUpdate, ChatRequest, ChatResponse, Decision, Device,
-  DeviceAssignment, DevicePlugin, Insight, PluginProposal, Reflex, Room, RoomCreate,
+  ActionRecord, AgentStatus, CapabilityUpdate, ChatRequest, ChatResponse, CooldownUpdate, Decision, Device,
+  DeviceAssignment, DeviceCooldown, DevicePlugin, Insight, PluginProposal, Reflex, Room, RoomCreate,
   SimDeviceCreate, StateChange,
 } from "./types";
 
@@ -73,4 +73,9 @@ export const api = {
   pauseReflex: (id: string) => http<Reflex>("POST", `/api/reflexes/${id}/pause`),
   resumeReflex: (id: string) => http<Reflex>("POST", `/api/reflexes/${id}/resume`),
   deleteReflex: (id: string) => http<void>("DELETE", `/api/reflexes/${id}`),
+  // D9: devices the agent leaves alone after the user overrode it.
+  cooldowns: () => http<DeviceCooldown[]>("GET", "/api/cooldowns"),
+  updateCooldown: (deviceId: string, body: CooldownUpdate) =>
+    http<DeviceCooldown>("PUT", `/api/cooldowns/${encodeURIComponent(deviceId)}`, body),
+  clearCooldown: (deviceId: string) => http<void>("DELETE", `/api/cooldowns/${encodeURIComponent(deviceId)}`),
 };

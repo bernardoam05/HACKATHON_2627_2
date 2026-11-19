@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { CooldownsProvider } from "./live/CooldownsProvider";
 import { DevicesProvider } from "./live/DevicesProvider";
 import { LiveProvider } from "./live/LiveProvider";
 import { RoomsProvider } from "./live/RoomsProvider";
@@ -11,7 +12,9 @@ createRoot(document.getElementById("root")!).render(
     <LiveProvider>
       <DevicesProvider>
         <RoomsProvider>
-          <App />
+          <CooldownsProvider>
+            <App />
+          </CooldownsProvider>
         </RoomsProvider>
       </DevicesProvider>
     </LiveProvider>
