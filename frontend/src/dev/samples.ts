@@ -1,6 +1,6 @@
 // Owner: Team B. Sample insights/reflexes for building the UI while the backend fakes return none.
 // Only active with "?exemplo" in the URL, so they can never be mistaken for real data.
-import type { Insight, Reflex } from "../api/types";
+import type { Insight, Reflex, WsMessage } from "../api/types";
 
 export const SAMPLE_MODE = new URLSearchParams(location.search).has("exemplo");
 
@@ -45,3 +45,21 @@ export const sampleReflexes: Reflex[] = [
     ],
   },
 ];
+
+/**
+ * The fakes never push WebSocket events, so with ?exemplo the app replays this one at startup to show
+ * the override notice (D9). Same device as the fakes' sample block: the fixture bulb "Light".
+ */
+export const sampleCooldownStarted: Extract<WsMessage, { type: "cooldown_started" }> = {
+  type: "cooldown_started",
+  cooldown: {
+    deviceId: "dc9814bc-81bb-4546-b22d-80705b65fd22",
+    until: new Date(now + 20 * 60_000).toISOString(),
+    reason: "manual_override",
+    actionId: "act-1",
+    capability: "brightness",
+    note: "Mudei brightness para 30, mas alteraste para 90. Não mexo neste dispositivo durante 20 min.",
+    startedAt: new Date(now).toISOString(),
+    defaultMinutes: 20,
+  },
+};

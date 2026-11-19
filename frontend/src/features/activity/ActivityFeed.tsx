@@ -1,13 +1,15 @@
 // Owner: Team B. Live from /ws: Undo for auto_notify, Confirm/Reject for suggest, reflex badge.
 // Each entry shows the essential line; details expand on demand so the feed stays light.
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { api } from "../../api/client";
 import type { ActionRecord, ActionStatus, AutonomyLevel, Decision } from "../../api/types";
+import { useCooldowns } from "../../live/CooldownsProvider";
 import { describeUpdate, useDeviceLabel } from "../../live/DevicesProvider";
 import { useLiveMessages } from "../../live/LiveProvider";
 import { formatClock, timeAgo, useNow } from "../../lib/time";
 import { errorMessage, useResource } from "../../lib/useResource";
 import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading } from "../../ui";
+import { cooldownAnchor } from "../cooldowns/CooldownList";
 import { DecisionCard } from "../decisions/DecisionCard";
 
 const LIMIT = 50;
@@ -122,10 +124,35 @@ function When({ iso }: { iso: string }) {
   return <time dateTime={iso} title={formatClock(iso)} className="text-xs text-muted">{timeAgo(iso, now)}</time>;
 }
 
+const OVERRIDDEN = { label: "Contrariada por ti", tone: "warn" as Tone };
+
+/**
+ * Status of an action for display. An undone action whose id is the `actionId` of an active block was
+ * overridden by the user (D9), not undone with the Undo button.
+ */
+function useActionStatus(): (a: ActionRecord) => { label: string; tone: Tone; overridden: boolean } {
+  const { byAction } = useCooldowns();
+  return (a) => (a.status === "undone" && byAction.has(a.id)
+    ? { ...OVERRIDDEN, overridden: true }
+    : { ...STATUS[a.status], overridden: false });
+}
+
 /** One badge per distinct action status, e.g. "Feito" or "À espera". */
 function StatusBadges({ actions }: { actions: ActionRecord[] }) {
-  const statuses = [...new Set(actions.map((a) => a.status))];
-  return <>{statuses.map((s) => <Badge key={s} tone={STATUS[s].tone}>{STATUS[s].label}</Badge>)}</>;
+  const statusOf = useActionStatus();
+  const shown = new Map(actions.map((a) => { const s = statusOf(a); return [s.label, s.tone] as const; }));
+  return <>{[...shown].map(([label, tone]) => <Badge key={label} tone={tone}>{label}</Badge>)}</>;
+}
+
+/** Jumps to the block in the Gestor tab. */
+function BlockLink({ deviceId }: { deviceId: string }) {
+  const go = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    location.hash = "manager";
+    setTimeout(() => document.getElementById(cooldownAnchor(deviceId))
+      ?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  };
+  return <a href="#manager" onClick={go} className="text-sm text-accent hover:underline">Ver bloqueio</a>;
 }
 
 function DecisionEntry({ decision, actions, reflexIds, onResolved }: {
@@ -169,6 +196,7 @@ function ActionEntry({ action, reflex, onResolved }: {
   reflex: boolean;
   onResolved: (a: ActionRecord) => void;
 }) {
+  const statusOf = useActionStatus();
   return (
     <Expandable summary={
       <div className="grid gap-1">
@@ -181,6 +209,7 @@ function ActionEntry({ action, reflex, onResolved }: {
       </div>
     }>
       <p className="m-0 text-sm text-muted">{AUTONOMY[action.autonomy]}</p>
+      {statusOf(action).overridden && <BlockLink deviceId={action.deviceId} />}
       <ActionButtons action={action} onResolved={onResolved} />
     </Expandable>
   );
@@ -203,7 +232,7 @@ function ActionDetails({ action, reason, reflex, onResolved }: {
   reflex: boolean;
   onResolved: (a: ActionRecord) => void;
 }) {
-  const status = STATUS[action.status];
+  const status = useActionStatus()(action);
   return (
     <div className="grid gap-1.5 rounded-lg border border-line bg-surface px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -216,6 +245,7 @@ function ActionDetails({ action, reason, reflex, onResolved }: {
       <p className="m-0 text-sm text-muted">
         {reason ? `${reason} · ` : ""}{AUTONOMY[action.autonomy]}
       </p>
+      {status.overridden && <BlockLink deviceId={action.deviceId} />}
       <ActionButtons action={action} onResolved={onResolved} />
     </div>
   );

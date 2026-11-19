@@ -2,7 +2,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../api/client";
 import type { Capability, CapabilityUpdate, Device, JsonValue } from "../../api/types";
+import { useCooldown } from "../../live/CooldownsProvider";
 import { formatValue, useDevices } from "../../live/DevicesProvider";
+import { blockedLabel } from "../cooldowns/CooldownOptions";
 import { useRooms } from "../../live/RoomsProvider";
 import { errorMessage, useResource } from "../../lib/useResource";
 import {
@@ -106,6 +108,7 @@ function stateSummary(d: Device): string {
 
 function DeviceItem({ device }: { device: Device }) {
   const summary = stateSummary(device);
+  const cooldown = useCooldown(device.id);
   return (
     <Expandable className={device.enabled ? "" : "opacity-70"} summary={
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -114,6 +117,7 @@ function DeviceItem({ device }: { device: Device }) {
           {summary && <p className="m-0 text-sm text-muted">{summary}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          {cooldown && <Badge tone="warn">{blockedLabel(cooldown)}</Badge>}
           {!device.enabled && <Badge tone="warn">Desativado</Badge>}
           <Badge tone={device.source === "sim" ? "accent" : "neutral"}>
             {device.source === "sim" ? "Simulado" : "Real"}

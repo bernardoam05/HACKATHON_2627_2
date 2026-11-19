@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import ActivityFeed from "./features/activity/ActivityFeed";
 import ChatPage from "./features/chat/ChatPage";
+import CooldownList from "./features/cooldowns/CooldownList";
+import CooldownNotices from "./features/cooldowns/CooldownNotices";
 import BeliefPanel from "./features/learned/BeliefPanel";
 import InsightsList from "./features/learned/InsightsList";
 import ReflexList from "./features/learned/ReflexList";
@@ -20,14 +22,20 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 
-function initialTab(): Tab {
+function tabFromHash(): Tab | null {
   const hash = location.hash.slice(1);
-  return TABS.some((t) => t.id === hash) ? (hash as Tab) : "chat";
+  return TABS.some((t) => t.id === hash) ? (hash as Tab) : null;
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTab] = useState<Tab>(() => tabFromHash() ?? "chat");
   useEffect(() => { history.replaceState(null, "", `#${tab}`); }, [tab]);
+  // Links like <a href="#manager"> (e.g. "Ver bloqueio" in the activity feed) switch tabs.
+  useEffect(() => {
+    const onHash = () => { const t = tabFromHash(); if (t) setTab(t); };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-4 sm:pb-12">
@@ -56,8 +64,11 @@ export default function App() {
         <div hidden={tab !== "chat"}><ChatPage /></div>
         <div hidden={tab !== "activity"}><ActivityFeed /></div>
         <div hidden={tab !== "learned"} className="grid gap-4"><BeliefPanel /><InsightsList /><ReflexList /></div>
-        <div hidden={tab !== "manager"} className="grid gap-4"><DeviceList /><RoomEditor /><PluginConfig /></div>
+        <div hidden={tab !== "manager"} className="grid gap-4">
+          <DeviceList /><CooldownList /><RoomEditor /><PluginConfig />
+        </div>
       </main>
+      <CooldownNotices />
     </div>
   );
 }
