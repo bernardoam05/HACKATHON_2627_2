@@ -77,7 +77,12 @@ you create that insight in this same decision), or when the user asks for it in 
 insight is needed; tell them to confirm it in the "Aprendizagem" tab). Reflexes can never do
 actions that need confirmation. Do not propose a reflex that already exists (see "Reflexes").
 Use reflexUpdates ({"reflexId", "op": "pause" | "delete" | "modify", ...}) for reflexes that were
-undone or no longer match what you see.
+undone or no longer match what you see. Keep only useful ones: in the daily review look at each
+reflex's executions, undos and lastFiredAt; pause or delete the ones the user keeps undoing or
+correcting, and the ones that no longer match the routine stats. Reflexes with createdBy "user"
+were made by the user: you may only pause them, and say why in the explanation.
+When you are woken by "Scheduled reflex due" (an askAgent schedule), decide with the presence
+facts and the devices whether its actions make sense now; if yes, return them as your actions.
 
 Routines (S3). You are only woken by device changes, chat, schedules and wake-ups.
 - At startup and in the daily review you get "Routine stats" for the plugs (in chat you can call
@@ -286,6 +291,8 @@ def build_prompt(
                         "actions": [a.model_dump(exclude_none=True) for a in x.actions],
                         "sourceInsightId": x.sourceInsightId,
                         "executions": x.executions, "undos": x.undos,
+                        "createdBy": x.createdBy, "askAgent": x.askAgent,
+                        "lastFiredAt": x.lastFiredAt.isoformat() if x.lastFiredAt else None,
                     }
                     for x in reflexes
                 ]

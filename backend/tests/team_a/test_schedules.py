@@ -199,6 +199,51 @@ async def test_first_motion_schedule_fires_after_waking_up(home):
     assert lamp(srv) == "on"
 
 
+@pytest.mark.parametrize("home", ["2026-11-20T07:30:05"], indirect=True)
+async def test_ask_agent_schedule_wakes_the_agent_instead_of_running(home):
+    services, srv = home
+    asked: list[str] = []
+
+    async def ask(reason: str) -> None:
+        asked.append(reason)
+
+    services.reflexes.ask_agent = ask
+    await services.agent.create_reflex(WAKE_LIGHT.model_copy(update={"askAgent": True}))
+    assert await services.reflexes.tick() == []
+    assert lamp(srv) == "off"  # not run blindly
+    assert len(asked) == 1 and "Scheduled reflex due: 'Acordar com luz'" in asked[0]
+    assert '"deviceId": "lamp"' in asked[0]
+    await services.reflexes.tick()
+    assert len(asked) == 1  # asked once per day
+
+
+@pytest.mark.parametrize("home", ["2026-11-20T07:30:05"], indirect=True)
+async def test_schedule_the_user_keeps_undoing_is_paused(home):
+    services, srv = home
+    r = await services.agent.create_reflex(WAKE_LIGHT)
+    for _ in range(2):  # REFLEX_MAX_UNDOS = 2
+        await services.reflexes.tick()
+        [action] = [a for a in await services.actions.list_actions("executed", 10)
+                    if a.decisionId == f"reflex:{r.id}"]
+        await services.actions.undo(action.id)
+        await services.feedback.clear_cooldown("lamp")
+        stored = await services.repo.get_reflex(r.id)  # pretend the next day came
+        await services.repo.save_reflex(stored.model_copy(update={"lastFiredAt": None}))
+    assert (await services.repo.get_reflex(r.id)).status == ReflexStatus.paused
+
+
+async def test_agent_may_only_pause_user_schedules(home):
+    from app.agent.reflexes import ReflexUpdateDraft
+
+    services, _ = home
+    r = await services.agent.create_reflex(WAKE_LIGHT)
+    assert r.createdBy == "user"
+    await services.reflexes.apply_agent_updates([ReflexUpdateDraft(reflexId=r.id, op="delete")])
+    assert (await services.repo.get_reflex(r.id)).status == ReflexStatus.active  # refused
+    await services.reflexes.apply_agent_updates([ReflexUpdateDraft(reflexId=r.id, op="pause")])
+    assert (await services.repo.get_reflex(r.id)).status == ReflexStatus.paused
+
+
 # --- the agent proposes schedules (scripted model) ---------------------------------------------
 
 

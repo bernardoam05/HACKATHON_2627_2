@@ -101,6 +101,11 @@ class Reflex(BaseModel):
     executions: int = 0
     undos: int = 0
     lastFiredAt: datetime | None = None  # scheduled reflexes fire at most once per house day
+    # Scheduled reflexes only: at the due time, wake the agent to decide whether the actions
+    # still make sense (is anyone home?) instead of running them blindly (costs one LLM call).
+    askAgent: bool = False
+    # "user": created by the user (POST /api/reflexes); the agent may only pause it.
+    createdBy: Literal["agent", "user"] = "agent"
 
 
 class ReflexCreate(BaseModel):
@@ -111,6 +116,7 @@ class ReflexCreate(BaseModel):
     triggers: list[ReflexTrigger] = Field(min_length=1)
     triggerLogic: Literal["all", "any"] = "all"
     actions: list[ProposedAction] = Field(min_length=1)
+    askAgent: bool = False
 
 
 class ReflexProposal(BaseModel):

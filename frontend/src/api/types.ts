@@ -189,6 +189,10 @@ export interface Reflex {
   executions: number;
   undos: number;
   lastFiredAt?: ISODate | null;
+  /** Scheduled only: at the due time the agent decides whether to run the actions (1 LLM call). */
+  askAgent?: boolean;
+  /** "user": created by the user (the agent may only pause it). */
+  createdBy?: "agent" | "user";
 }
 
 /** POST /api/reflexes: a schedule/automation created by the user (active at once). */
@@ -197,6 +201,7 @@ export interface ReflexCreate {
   triggers: ReflexTrigger[];
   triggerLogic?: "all" | "any";
   actions: ProposedAction[];
+  askAgent?: boolean;
 }
 
 export interface ReflexProposal { reflex: Reflex; rationale: string }

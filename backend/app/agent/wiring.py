@@ -145,6 +145,7 @@ async def build_services(
 
     scheduler = LatestWinsScheduler(run_agent, on_status)
     agent.scheduler = scheduler
+    reflexes.ask_agent = agent.wake  # `askAgent` schedules let the agent decide at the due time
 
     async def clock() -> None:
         """Scheduled reflexes (no LLM) and the once-a-day routine review."""

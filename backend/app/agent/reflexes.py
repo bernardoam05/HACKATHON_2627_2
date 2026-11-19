@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -203,6 +204,8 @@ class ReflexEngine:
         self._broadcast = broadcast
         self._now = now
         self._min_conf = min_confidence
+        # Set by the wiring to agent.wake: used by `askAgent` schedules.
+        self.ask_agent: Callable[[str], Awaitable[None]] | None = None
 
     async def on_changes(self, changes: list[StateChange]) -> list[StateChange]:
         """Poller hook. Agent-caused changes never trigger reflexes (no chains, no loops)."""
@@ -264,6 +267,10 @@ class ReflexEngine:
             if not is_due(reflex, now, first_motion, state):
                 continue
             log.info("scheduled reflex %s (%s) is due", reflex.id, reflex.name)
+            if reflex.askAgent and self.ask_agent is not None:
+                await self._repo.save_reflex(reflex.model_copy(update={"lastFiredAt": now}))
+                await self.ask_agent(_ask_reason(reflex))
+                continue
             change = await self._execute(reflex, fired_at=now)
             if change is not None:
                 out.append(change)
@@ -385,6 +392,9 @@ class ReflexEngine:
             reflex = await self._repo.get_reflex(d.reflexId)
             if reflex is None or reflex.status == ReflexStatus.deleted:
                 continue
+            if reflex.createdBy == "user" and d.op != "pause":
+                log.info("agent %s on user reflex %s refused: it may only pause it", d.op, reflex.id)
+                continue
             if d.op == "pause":
                 if reflex.status != ReflexStatus.active:
                     continue
@@ -428,6 +438,8 @@ class ReflexEngine:
             actions=body.actions,
             status=ReflexStatus.active,
             createdAt=datetime.now(UTC),
+            askAgent=body.askAgent,
+            createdBy="user",
         )
         await self._repo.save_reflex(reflex)
         await self._broadcast(ReflexUpdatedMsg(reflex=reflex))
@@ -446,6 +458,21 @@ class ReflexEngine:
         await self._repo.save_reflex(reflex)
         await self._broadcast(ReflexUpdatedMsg(reflex=reflex))
         return reflex
+
+
+ASK_AGENT_PREFIX = "Scheduled reflex due"
+
+
+def _ask_reason(reflex: Reflex) -> str:
+    """Wake-up text for an `askAgent` schedule: the agent decides, with the presence facts and
+    every device in its prompt, whether to run the actions now."""
+    acts = [{"deviceId": a.deviceId, "update": a.update.model_dump(exclude_none=True)}
+            for a in reflex.actions]
+    return (
+        f"{ASK_AGENT_PREFIX}: '{reflex.name}' ({reflex.id}). Decide whether its actions make "
+        f"sense right now (is anyone home? already in effect? unusual day?). If yes, return them "
+        f"as your actions; if not, do nothing and say why. Actions: {json.dumps(acts)}"
+    )
 
 
 def _same(r: Reflex, triggers: list[ReflexTrigger], actions: list[ProposedAction]) -> bool:
