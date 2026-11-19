@@ -1,10 +1,22 @@
-// Owner: Team B. Web Speech API push-to-talk (pt-PT) + speechSynthesis.
-export function useVoice() {
-  // TODO(Team B): SpeechRecognition with lang="pt-PT"; speak(text) via speechSynthesis.
+// Owner: Team B. Voice input for the chat (Web Speech API dictation, pt-PT), as an assistant-ui adapter.
+// Replies are text only: the assistant does not speak.
+import { WebSpeechDictationAdapter, type DictationAdapter } from "@assistant-ui/react";
+
+const LANG = "pt-PT";
+
+/** Set when the next message was dictated, so the backend gets inputMode "voice". */
+export const voiceInput = { used: false };
+
+export const dictationSupported = WebSpeechDictationAdapter.isSupported();
+
+/** assistant-ui dictation in pt-PT that marks the next message as spoken. */
+export function createDictation(): DictationAdapter | undefined {
+  if (!dictationSupported) return undefined;
+  const inner = new WebSpeechDictationAdapter({ language: LANG, continuous: true, interimResults: true });
   return {
-    listening: false,
-    start: (_onResult: (text: string) => void) => { void _onResult; },
-    stop: () => {},
-    speak: (_text: string) => { void _text; },
+    listen: () => {
+      voiceInput.used = true;
+      return inner.listen();
+    },
   };
 }

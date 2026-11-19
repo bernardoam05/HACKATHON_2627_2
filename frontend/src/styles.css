@@ -1,0 +1,50 @@
+/* Owner: Team B. Tailwind v4 + design tokens. Theme = <html data-theme="light|dark">, set before
+   first paint by index.html (saved choice, else the OS setting) and toggled by ThemeToggle.
+   Tokens become utilities: bg-canvas, bg-surface, text-ink, text-muted, border-line,
+   bg-accent / bg-accent-soft, text-good / bg-good-soft, warn, bad. */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-canvas: #f6f5f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #efede8;
+  --color-line: #e2dfd8;
+  --color-ink: #1d1c1a;
+  --color-muted: #6b6760;
+  --color-accent: #2f6f5e;
+  --color-accent-soft: #dcebe6;
+  --color-good: #2e7d4f;
+  --color-good-soft: #dff1e6;
+  --color-warn: #9a6400;
+  --color-warn-soft: #f8ecd2;
+  --color-bad: #b23b3b;
+  --color-bad-soft: #f7dede;
+}
+
+:root { color-scheme: light; }
+
+:root[data-theme="dark"] {
+    --color-canvas: #141513;
+    --color-surface: #1d1f1c;
+    --color-surface-2: #262825;
+    --color-line: #33362f;
+    --color-ink: #ecebe6;
+    --color-muted: #a19d94;
+    --color-accent: #7cc4ad;
+    --color-accent-soft: #23352f;
+    --color-good: #7fcf9b;
+    --color-good-soft: #1f3327;
+    --color-warn: #e2b154;
+    --color-warn-soft: #3a2f19;
+    --color-bad: #ec8a8a;
+    --color-bad-soft: #3b2222;
+    color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-ink font-sans text-[15px] leading-normal antialiased;
+  }
+}
