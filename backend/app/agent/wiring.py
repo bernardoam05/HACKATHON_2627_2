@@ -12,6 +12,7 @@ from app.config import Settings
 from app.devices.registry import DeviceRegistry
 from app.devices.rooms import RoomStore
 from app.mcp_clients.altice import AlticeClient
+from app.mcp_clients.auth import build_provider
 from app.mcp_clients.base import McpClient
 from app.mcp_clients.sim import SimClient
 from app.plugins.registry import PluginRegistry
@@ -46,7 +47,10 @@ async def build_services(
             clients[DeviceSource.sim] = SimClient(settings.SIM_MCP_URL)
         if settings.ALTICE_MCP_URL:
             clients[DeviceSource.altice] = AlticeClient(
-                settings.ALTICE_MCP_URL, settings.ALTICE_MCP_TOKEN
+                settings.ALTICE_MCP_URL,
+                settings.ALTICE_MCP_TOKEN,
+                settings.ALTICE_CLIENT_TYPE,
+                auth=build_provider(settings, repo),  # never interactive in the backend
             )
 
     rooms = RoomStore(repo)

@@ -10,7 +10,13 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     ALTICE_MCP_URL: str = ""
+    # Altice MCP API key (the "cgh_..." key): sent as X-API-Key, NOT as the Bearer token.
     ALTICE_MCP_TOKEN: str = ""
+    ALTICE_CLIENT_TYPE: str = "core"  # sent as X-Client-Type; decides which tools are visible
+    # Keycloak OAuth (authorization code + PKCE) for the Bearer token. The redirect host resolves
+    # to 127.0.0.1: `python -m app.mcp_clients.auth login` listens on its port to catch the code.
+    ALTICE_OAUTH_CLIENT_ID: str = "mcp-client"
+    ALTICE_OAUTH_REDIRECT_URI: str = "http://mcp-redirect.futurelabsinnovations.com:5434/callback"
     SIM_MCP_URL: str = "http://localhost:8100/mcp"
     AGENT_MODEL: str = "anthropic:claude-sonnet-5-5"
     DB_PATH: str = "home.db"
