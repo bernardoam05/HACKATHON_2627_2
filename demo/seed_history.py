@@ -1,13 +1,118 @@
-"""Generate demo/seed/history.jsonl: 14 days of coffee-plug instantPower on weekday mornings
-(~07:30) plus TV evenings, one StateChange JSON per line.
+"""Generate demo/seed/history.jsonl: 14 days of coffee-plug use on weekday mornings (~07:30)
+plus TV evenings, one StateChange JSON per line (PLAN 5.8).
 
 # Owner: Team B
+Usage:  python demo/seed_history.py [--days 14] [--end 2026-11-19] [--utc-offset 0] [--seed 42]
+Import: cd backend && uv run python -m app.storage.import_seed ../demo/seed/history.jsonl --align-to-today
+
+Device ids match simulator/home.json. What the agent should be able to learn from it:
+- S3: on weekdays the coffee machine (sim-cafe-cozinha) is switched on around 07:30 and heats
+  for 2 minutes (~1200 W), then idles (~2 W) and is switched off ~20 minutes later.
+  Weekends: later (~10:00) and only some days.
+- S1: every evening the TV (sim-tv-sala) goes on around 21:00 and, a minute later, someone
+  dims the living-room light (sim-luz-sala) from 80% to 30%.
+
+Deterministic for a given --seed. Standard library only. Timestamps carry an explicit offset;
+the backend stores UTC (get_routine_stats reports UTC), Lisbon in winter is +00:00.
 """
 from __future__ import annotations
 
+import argparse
+import json
+import random
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+OUT = Path(__file__).resolve().parent / "seed" / "history.jsonl"
+
+COFFEE = "sim-cafe-cozinha"
+TV = "sim-tv-sala"
+LIGHT = "sim-luz-sala"
+
+COFFEE_HEAT_W, COFFEE_IDLE_W, TV_ON_W = 1200, 2, 85  # same as simulator/world.py
+
+
+class Day:
+    """Collects the StateChanges of one day; ids are stable (date + order)."""
+
+    def __init__(self, day: date, tz: timezone) -> None:
+        self.day, self.tz = day, tz
+        self.rows: list[dict[str, Any]] = []
+
+    def at(self, hh: int, mm: int, minutes_offset: float = 0) -> datetime:
+        return datetime.combine(self.day, time(hh, mm), self.tz) + timedelta(minutes=minutes_offset)
+
+    def change(self, when: datetime, device: str, capability: str, old: Any, new: Any) -> None:
+        self.rows.append({
+            "id": f"seed-{self.day.isoformat()}-{len(self.rows):02d}",
+            "deviceId": device,
+            "capability": capability,
+            "old": old,
+            "new": new,
+            "at": when.isoformat(timespec="seconds"),
+            "causedByAgent": False,
+            "actionId": None,
+        })
+
+
+def coffee(d: Day, start: datetime, rng: random.Random) -> None:
+    """Power on -> heats 2 min -> idles -> switched off after ~15-25 min."""
+    heated = start + timedelta(minutes=2)
+    off = start + timedelta(minutes=rng.uniform(15, 25))
+    d.change(start, COFFEE, "power", "off", "on")
+    d.change(start, COFFEE, "instantPower", 0, COFFEE_HEAT_W)
+    d.change(heated, COFFEE, "instantPower", COFFEE_HEAT_W, COFFEE_IDLE_W)
+    d.change(off, COFFEE, "power", "on", "off")
+    d.change(off, COFFEE, "instantPower", COFFEE_IDLE_W, 0)
+
+
+def tv_evening(d: Day, rng: random.Random) -> None:
+    """TV on ~21:00, light dimmed 80 -> 30 a minute later, TV off ~23:00, light off after."""
+    on = d.at(21, 0, rng.gauss(0, 12))
+    dim = on + timedelta(minutes=rng.uniform(0.5, 2))
+    off = d.at(23, 0, rng.gauss(0, 20))
+    d.change(on, TV, "power", "off", "on")
+    d.change(on, TV, "instantPower", 0, TV_ON_W)
+    d.change(dim, LIGHT, "brightness", 80, 30)
+    d.change(off, TV, "power", "on", "off")
+    d.change(off, TV, "instantPower", TV_ON_W, 0)
+    d.change(off + timedelta(minutes=rng.uniform(1, 4)), LIGHT, "power", "on", "off")
+
+
+def generate(days: int, end: date, tz: timezone, seed: int) -> list[dict[str, Any]]:
+    rng = random.Random(seed)
+    rows: list[dict[str, Any]] = []
+    for i in range(days - 1, -1, -1):
+        d = Day(end - timedelta(days=i), tz)
+        if d.day.weekday() < 5:  # Monday..Friday
+            coffee(d, d.at(7, 30, rng.gauss(0, 4)), rng)
+        elif rng.random() < 0.5:
+            coffee(d, d.at(10, 0, rng.gauss(0, 20)), rng)
+        tv_evening(d, rng)
+        rows.extend(d.rows)
+    rows.sort(key=lambda r: r["at"])
+    return rows
+
 
 def main() -> None:
-    raise NotImplementedError("Team B: write StateChange lines to demo/seed/history.jsonl")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--days", type=int, default=14)
+    p.add_argument("--end", type=date.fromisoformat, default=date.today(), help="last day (YYYY-MM-DD)")
+    p.add_argument("--utc-offset", type=float, default=0, help="local offset in hours (Lisbon winter: 0)")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--out", type=Path, default=OUT)
+    a = p.parse_args()
+
+    tz = timezone(timedelta(hours=a.utc_offset))
+    rows = generate(a.days, a.end, tz, a.seed)
+    a.out.parent.mkdir(parents=True, exist_ok=True)
+    first, last = a.end - timedelta(days=a.days - 1), a.end
+    with a.out.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(f"# Seed history {first}..{last} (seed {a.seed}), generated by demo/seed_history.py\n")
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"wrote {len(rows)} changes ({first}..{last}) to {a.out}")
 
 
 if __name__ == "__main__":

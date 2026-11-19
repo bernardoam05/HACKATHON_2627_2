@@ -1,10 +1,17 @@
 name: s2
 description: User leaves kitchen into corridor -> kitchen light fades off, corridor light fades on
-now_override: null  # e.g. 2026-11-19T21:00:00
+now_override: null
+# Run it a few times: once learned and confirmed, it becomes an instant reflex (D16).
 devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
 state:        # applied by sim_load_scenario after the reset, as physical events
   sim-luz-cozinha: {power: "on", brightness: 80}
   sim-luz-corredor: {power: "off"}
   sim-movimento-cozinha: {motionDetected: true}
-steps: []     # Team B: ordered sim_set_state calls with delays
-expect: []    # Team B: expected agent actions
+steps:
+  - {wait: 5, say: "A pessoa sai da cozinha e entra no corredor.",
+     set: {device: sim-movimento-corredor, capability: motionDetected, value: true}}
+  - {wait: 2, say: "Já não há movimento na cozinha.",
+     set: {device: sim-movimento-cozinha, capability: motionDetected, value: false}}
+expect:
+  - {say: "A luz do corredor acende", device: sim-luz-corredor, capability: power, value: "on", within: 45}
+  - {say: "A luz da cozinha apaga", device: sim-luz-cozinha, capability: power, value: "off", within: 60}

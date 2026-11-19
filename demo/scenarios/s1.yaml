@@ -1,9 +1,14 @@
 name: s1
 description: TV turns on in the evening -> living-room light dims
-now_override: null  # e.g. 2026-11-19T21:00:00
+now_override: "2026-11-19T21:00:00"   # evening; the backend reads it at startup
 devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
 state:        # applied by sim_load_scenario after the reset, as physical events
   sim-tv-sala: {power: "off"}
   sim-luz-sala: {power: "on", brightness: 80}
-steps: []     # Team B: ordered sim_set_state calls with delays
-expect: []    # Team B: expected agent actions
+  sim-movimento-sala: {motionDetected: true}
+steps:
+  - {wait: 3, say: "Ao serão, alguém liga a televisão da sala.",
+     set: {device: sim-tv-sala, capability: power, value: "on"}}
+expect:
+  - {say: "A luz da sala baixa", device: sim-luz-sala, capability: brightness, op: "<", value: 80, within: 45}
+  - {say: "A luz da sala continua ligada", device: sim-luz-sala, capability: power, value: "on", within: 45}

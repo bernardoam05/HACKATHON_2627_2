@@ -185,6 +185,30 @@ def test_add_device_rejects_bad_overrides(world: World, override: dict, match: s
     assert {d["id"] for d in world.list_devices()} == before
 
 
+def test_add_device_of_a_new_type(world: World) -> None:
+    """The backend sends `template or type`: an unknown name plus capabilities defines a new type (S5)."""
+    dev = world.add_device("smartLock", "Fechadura", "Entrada", capabilities=[
+        {"type": "locked", "name": "", "value": True, "availableValues": ["on", "off"]},
+        {"type": "battery", "value": 80, "min": 0, "max": 100},
+    ])
+    assert dev["type"] == "smartLock" and dev["name"] == "Fechadura" and "categories" not in dev
+    assert cap(dev, "locked") == "on" and cap(dev, "battery") == 80
+    Device.model_validate(dev)
+    with pytest.raises(SimError, match="not writable"):  # unknown types have no writable capabilities
+        world.update_capabilities({"type": "locked", "value": "off"}, device_id=dev["id"])
+    assert cap(world.set_state(dev["id"], "locked", "off"), "locked") == "off"  # physical events work
+
+
+@pytest.mark.parametrize("template, caps, match", [
+    ("smartLock", None, "needs at least one capability"),
+    ("smart lock", [{"type": "locked", "value": False}], "invalid device type"),
+    ("../x", [{"type": "locked", "value": False}], "invalid device type"),
+])
+def test_new_type_rejections(world: World, template: str, caps, match: str) -> None:
+    with pytest.raises(SimError, match=match):
+        world.add_device(template, "X", capabilities=caps)
+
+
 def test_list_templates(world: World) -> None:
     ids = {t["id"] for t in world.list_templates()}
     assert ids >= {"tv", "coffee_plug", "bulb", "contactSensor", "motionSensor"}
@@ -251,6 +275,12 @@ async def test_team_a_parser_reads_simulator_payloads(server) -> None:
         assert [Device.model_validate(d) for d in devices["devices"]]
         added = _parse_result(await client.call_tool("sim_add_device", {"template": "bulb", "name": "Teste"}))
         assert Device.model_validate(added).type == "bulb"
+        # New type, exactly as DeviceRegistry.add_device sends it (template = body.template or body.type).
+        new = _parse_result(await client.call_tool("sim_add_device", {
+            "template": "smartLock", "name": "Fechadura",
+            "capabilities": [{"type": "locked", "name": "", "value": "off", "availableValues": ["on", "off"]}],
+        }))
+        assert Device.model_validate(new).type == "smartLock"
 
 
 async def test_mcp_refusal_keeps_reason(server) -> None:
