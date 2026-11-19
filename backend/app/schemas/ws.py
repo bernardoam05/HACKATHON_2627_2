@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .agent import Decision, Insight, Reflex
 from .device import Device
-from .events import ActionRecord, StateChange
+from .events import ActionRecord, DeviceCooldown, StateChange
 
 
 class StateChangedMsg(BaseModel):
@@ -67,6 +67,20 @@ class ReflexExecutedMsg(BaseModel):
     actions: list[ActionRecord]
 
 
+class CooldownStartedMsg(BaseModel):
+    """The user overrode the agent: show the note and the blocking options (PUT/DELETE
+    /api/cooldowns/{deviceId})."""
+
+    type: Literal["cooldown_started"] = "cooldown_started"
+    cooldown: DeviceCooldown
+
+
+class CooldownEndedMsg(BaseModel):
+    type: Literal["cooldown_ended"] = "cooldown_ended"
+    deviceId: str
+    reason: Literal["expired", "user"]
+
+
 WsMessage = Annotated[
     StateChangedMsg
     | DecisionMsg
@@ -78,6 +92,8 @@ WsMessage = Annotated[
     | InsightUpdatedMsg
     | ReflexProposedMsg
     | ReflexUpdatedMsg
-    | ReflexExecutedMsg,
+    | ReflexExecutedMsg
+    | CooldownStartedMsg
+    | CooldownEndedMsg,
     Field(discriminator="type"),
 ]

@@ -30,7 +30,16 @@ from .device import (
     RoomCreate,
     SimDeviceCreate,
 )
-from .events import ActionRecord, ActionStatus, StateChange, StateSnapshot, UserFeedback
+from .events import (
+    ActionRecord,
+    ActionStatus,
+    CooldownReason,
+    CooldownUpdate,
+    DeviceCooldown,
+    StateChange,
+    StateSnapshot,
+    UserFeedback,
+)
 from .plugin import (
     CATEGORY_DEFAULT_AUTONOMY,
     AutonomyLevel,
@@ -43,6 +52,8 @@ from .plugin import (
 from .ws import (
     ActionUpdatedMsg,
     AgentStatusMsg,
+    CooldownEndedMsg,
+    CooldownStartedMsg,
     DecisionMsg,
     DeviceAddedMsg,
     DeviceRemovedMsg,

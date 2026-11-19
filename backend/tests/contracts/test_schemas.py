@@ -4,11 +4,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from app.schemas import (
     AutonomyLevel,
+    CooldownUpdate,
     Device,
+    DeviceCooldown,
     DevicePlugin,
     DevicePurpose,
     PresenceFacts,
@@ -51,6 +53,23 @@ def test_ws_discriminated_union():
     msg = TypeAdapter(WsMessage).validate_python({"type": "agent_status", "busy": True, "dirty": False})
     assert msg.type == "agent_status"
     assert StateChangedMsg(changes=[]).type == "state_changed"
+
+
+def test_cooldown_contract():
+    with pytest.raises(ValidationError):
+        CooldownUpdate()
+    with pytest.raises(ValidationError):
+        CooldownUpdate(minutes=5, untilUnblocked=True)
+    assert CooldownUpdate(minutes=0).minutes == 0
+    cd = DeviceCooldown(deviceId="d", reason="manual_override", startedAt=datetime.now(UTC),
+                        defaultMinutes=20)
+    assert cd.until is None  # null = until the user unblocks
+    msg = TypeAdapter(WsMessage).validate_python(
+        {"type": "cooldown_started", "cooldown": json.loads(cd.model_dump_json())})
+    assert msg.type == "cooldown_started"
+    ended = TypeAdapter(WsMessage).validate_python(
+        {"type": "cooldown_ended", "deviceId": "d", "reason": "user"})
+    assert ended.type == "cooldown_ended"
 
 
 def test_now_is_timezone_aware_example():

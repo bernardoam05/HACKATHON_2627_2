@@ -111,6 +111,26 @@ export interface UserFeedback {
   note?: string | null;
 }
 
+export type CooldownReason = "manual_override" | "undo" | "user";
+
+/** The agent (and reflexes) leave this device alone until `until`; null = until the user unblocks (D9). */
+export interface DeviceCooldown {
+  deviceId: string;
+  until?: ISODate | null;
+  reason: CooldownReason;
+  actionId?: string | null;
+  capability?: string | null;
+  note?: string | null;
+  startedAt: ISODate;
+  /** Duration used for this device's next override (0 = never block). */
+  defaultMinutes: number;
+}
+
+/** PUT /api/cooldowns/{deviceId}: exactly one of `minutes` (0 = unblock now) or `untilUnblocked: true`. */
+export type CooldownUpdate =
+  | { minutes: number; untilUnblocked?: false; rememberForDevice?: boolean }
+  | { minutes?: null; untilUnblocked: true; rememberForDevice?: false };
+
 // ---- agent.py
 export interface ProposedAction { deviceId: string; update: CapabilityUpdate; reason: string }
 
@@ -220,4 +240,6 @@ export type WsMessage =
   | { type: "insight_updated"; insight: Insight }
   | { type: "reflex_proposed"; reflex: Reflex }
   | { type: "reflex_updated"; reflex: Reflex }
-  | { type: "reflex_executed"; reflexId: string; actions: ActionRecord[] };
+  | { type: "reflex_executed"; reflexId: string; actions: ActionRecord[] }
+  | { type: "cooldown_started"; cooldown: DeviceCooldown }
+  | { type: "cooldown_ended"; deviceId: string; reason: "expired" | "user" };
