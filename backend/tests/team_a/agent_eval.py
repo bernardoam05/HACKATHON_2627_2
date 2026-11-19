@@ -280,8 +280,7 @@ async def run_door_then_motion(w: World) -> None:
     await w.settle()
     await w.set("mov-sala", "motionDetected", True)  # someone is still (or again) inside
     await w.settle()
-    await w.services.agent.wake("30s have passed since the last entrance-door event. "
-                                "Apply the empty-house rule to the presence facts below.")
+    await w.services.presence._fire_now()  # the door timer, with its real wake-up text
     await w.settle()
 
 

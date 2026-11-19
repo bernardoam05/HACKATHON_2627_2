@@ -215,9 +215,13 @@ class PresenceWatcher:
 
     async def _fire(self) -> None:
         await asyncio.sleep(self._delay + 1)
+        await self._fire_now()
+
+    async def _fire_now(self) -> None:
         await self._wake(
-            f"{self._delay:.0f}s have passed since the last entrance-door event. "
-            "Apply the empty-house rule to the presence facts below."
+            f"Door check: {self._delay:.0f}s after the last entrance-door event. Look at the "
+            "presence facts below to see whether someone is still at home (motion after the door "
+            "event means yes)."
         )
 
 

@@ -204,6 +204,15 @@ ROUTINE_REVIEW = (
     "insight and propose a scheduled reflex for it in this same decision; then answer."
 )
 MAX_WAKE_AHEAD = timedelta(hours=24)
+STANDING_ALERT_AGE = timedelta(minutes=10)  # an "alarm" reading older than this is not news
+
+
+def _age(delta: timedelta) -> str:
+    minutes = int(delta.total_seconds() // 60)
+    if minutes < 60:
+        return f"{max(minutes, 0)} min"
+    hours = minutes // 60
+    return f"{hours} h" if hours < 48 else f"{hours // 24} days"
 WAKE_GRACE = timedelta(minutes=10)
 
 
@@ -399,6 +408,7 @@ class HomeAgent:
                 presence=presence,
                 routines=routines,
                 all_devices=bool(wake_reasons),
+                standing_alerts=await self._standing_alerts(devices),
             )
             if user_message is not None:
                 prompt += (
@@ -432,6 +442,30 @@ class HomeAgent:
             decision = await self._finish(result.output, trigger, run_input)
             self._last_cutoff = cutoff
             return decision
+
+    async def _standing_alerts(self, devices: list) -> list[str]:
+        """Alert readings ("alarm") that are NOT new: they have not changed for a while, or have
+        never changed while the house has been observed. Raw facts, so the agent can tell a
+        long-standing reading (that device's normal state here) from a real event."""
+        out: list[str] = []
+        now = datetime.now(UTC)
+        observed_since = await self._repo.first_snapshot_at()
+        for d in devices:
+            for c in d.capabilities:
+                if str(c.value).lower() != "alarm":
+                    continue
+                last = await self._repo.last_change_at(d.id, c.type)
+                if last is not None and now - last < STANDING_ALERT_AGE:
+                    continue  # recent: a real event, leave it to the changes
+                name = d.alias or d.name or d.id
+                if last is not None:
+                    out.append(f"{name} ({d.id}) {c.type}='alarm' unchanged for "
+                               f"{_age(now - last)}")
+                else:
+                    since = _age(now - observed_since) if observed_since else "the start"
+                    out.append(f"{name} ({d.id}) {c.type}='alarm' since observation started "
+                               f"({since} ago), never changed")
+        return out
 
     async def _inline_facts(
         self, trigger: DecisionTrigger, changes: list, wake_reasons: list[str], devices: list
