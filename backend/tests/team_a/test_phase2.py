@@ -55,7 +55,8 @@ def house() -> list[dict[str, Any]]:
         {"id": "motion1", "name": "Corredor", "type": "motionSensor",
          "capabilities": [{"type": "motionDetected", "value": False}]},
         {"id": "door1", "name": "Porta", "type": "contactSensor", "categories": ["security"],
-         "capabilities": [{"type": "contact", "value": True}]},
+         "capabilities": [{"type": "sensorState", "value": "normal",
+                           "availableValues": ["normal", "alarm"]}]},
         {"id": "tv1", "name": "TV", "type": "tv", "capabilities": [{"type": "power", "value": "off"}]},
     ]
 
@@ -285,8 +286,8 @@ async def test_presence_facts_raw(home):
 
     await services.repo.add_changes([
         c("1", "motion1", "motionDetected", True, 120),
-        c("2", "door1", "contact", False, 100),  # opened
-        c("3", "door1", "contact", True, 95),  # closed
+        c("2", "door1", "sensorState", "alarm", 100),  # opened
+        c("3", "door1", "sensorState", "normal", 95),  # closed
     ])
     facts = await compute_presence_facts(services.devices, services.repo, 30)
     assert facts.lastDoorEvent and facts.lastDoorEvent.closedAt is not None
@@ -311,7 +312,8 @@ async def test_presence_watcher_wakes_agent_after_door_event(home):
         reasons.append(reason)
 
     watcher = PresenceWatcher(services.devices, services.repo, -0.9, wake)  # fires after ~0.1 s
-    await watcher.on_changes([ch("door1", "contact", True)])
+    await watcher.on_changes([ch("door1", "sensorState", "normal")])
+    await watcher.on_changes([ch("door1", "contact", True)])  # not a fixture name: ignored
     await watcher.on_changes([ch("motion1", "motionDetected", True)])  # not a door: ignored
     await asyncio.sleep(0.3)
     assert len(reasons) == 1 and "get_presence_facts" in reasons[0]

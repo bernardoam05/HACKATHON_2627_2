@@ -98,15 +98,14 @@ def register_tools(agent: Agent[AgentDeps, Any]) -> None:
 
 # --- presence (D14): raw facts only, code never concludes "empty" ---------------------------
 
-DOOR_CAPABILITIES = ("contact", "sensorState")
+# Names as in backend/fixtures (Altice); the simulator uses the same ones (D1).
+DOOR_CAPABILITIES = ("sensorState",)
 MOTION_CAPABILITY = "motionDetected"
 
 
 def door_is_open(capability: str, value: Any) -> bool | None:
-    """Sim contactSensor: `contact` false = open (no magnetic contact). Altice: `sensorState`
-    "alarm" = open. None when the change is not a door reading."""
-    if capability == "contact":
-        return value is False or str(value).lower() == "false"
+    """contactSensor `sensorState`: "alarm" = open, "normal" = closed.
+    None when the change is not a door reading."""
     if capability == "sensorState":
         return str(value).lower() == "alarm"
     return None
