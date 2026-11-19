@@ -29,26 +29,30 @@ export default function App() {
   useEffect(() => { history.replaceState(null, "", `#${tab}`); }, [tab]);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-12">
-      <header className="flex items-center justify-between gap-3 pb-3 pt-4">
-        <h1 className="text-lg font-semibold">Casa Inteligente</h1>
+    <div className="mx-auto max-w-5xl px-4 pb-4 sm:pb-12">
+      <header className="flex items-center justify-between gap-3 pb-2 pt-3 sm:pb-3 sm:pt-4">
+        <h1 className="text-[17px] font-semibold sm:text-lg">Casa Inteligente</h1>
         <StatusBar />
       </header>
-      <nav className="mb-5 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
+      <nav role="tablist"
+           className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line sm:mb-5
+                      [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((t) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
-                  className="-mb-px cursor-pointer whitespace-nowrap border-b-2 border-transparent px-3.5 py-2.5
-                             text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent
-                             aria-selected:border-accent aria-selected:font-semibold aria-selected:text-ink">
+                  className="cursor-pointer whitespace-nowrap border-b-2 border-transparent px-3 py-2.5 text-[15px]
+                             text-muted hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2
+                             focus-visible:outline-accent aria-selected:border-accent aria-selected:font-semibold
+                             aria-selected:text-ink sm:px-3.5 sm:py-2.5 sm:text-base">
             {t.label}
           </button>
         ))}
       </nav>
       <main className="grid gap-4">
-        {tab === "chat" && <ChatPage />}
-        {tab === "activity" && <ActivityFeed />}
-        {tab === "learned" && (<><BeliefPanel /><InsightsList /><ReflexList /></>)}
-        {tab === "manager" && (<><DeviceList /><RoomEditor /><PluginConfig /></>)}
+        {/* Tabs stay mounted so chat history and live feeds survive switching tabs. */}
+        <div hidden={tab !== "chat"}><ChatPage /></div>
+        <div hidden={tab !== "activity"}><ActivityFeed /></div>
+        <div hidden={tab !== "learned"} className="grid gap-4"><BeliefPanel /><InsightsList /><ReflexList /></div>
+        <div hidden={tab !== "manager"} className="grid gap-4"><DeviceList /><RoomEditor /><PluginConfig /></div>
       </main>
     </div>
   );
