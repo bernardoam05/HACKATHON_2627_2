@@ -39,6 +39,7 @@ COFFEE_HEAT_WATTS = 1200
 COFFEE_IDLE_WATTS = 2
 
 _SCENARIO_NAME = re.compile(r"[A-Za-z0-9_-]+")
+_TYPE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 _ON = {"on", "true", "1", "yes", "ligado", "ligada"}
 _OFF = {"off", "false", "0", "no", "desligado", "desligada"}
 _OPEN = {"open", "opened", "true", "1", "aberto", "aberta", "alarm"}
@@ -246,9 +247,7 @@ class World:
         capabilities: list[dict[str, Any]] | None,
         device_id: str | None,
     ) -> SimDevice:
-        tpl = self._templates.get(template)
-        if tpl is None:
-            raise SimError(f"unknown template {template!r}; known: {sorted(self._templates)}")
+        tpl = self._templates.get(template) or self._custom_type(template, capabilities)
         device_id = device_id or f"sim-{template}-{uuid.uuid4().hex[:8]}"
         if device_id in self._devices:
             raise SimError(f"device {device_id!r} already exists")
@@ -267,6 +266,21 @@ class World:
             pairedTime=now_ms,
             lastCommunicationTime=now_ms,
         )
+
+    def _custom_type(self, type_id: str, capabilities: list[dict[str, Any]] | None) -> dict[str, Any]:
+        """A type with no template (S5: the user invents one): the given capabilities define it.
+
+        The backend sends `template or type`, so `type_id` is the new type. It has no behaviour
+        and no categories, so the backend treats it as unknown (suggest until configured).
+        """
+        if not capabilities:
+            raise SimError(
+                f"unknown template {type_id!r}; known: {sorted(self._templates)}. "
+                "A new type needs at least one capability."
+            )
+        if not _TYPE_ID.fullmatch(type_id):
+            raise SimError(f"invalid device type {type_id!r}: use letters and digits, e.g. smartLock")
+        return {"type": type_id, "name": type_id, "categories": [], "capabilities": []}
 
     def _physical(self, dev: SimDevice, cap_type: str, value: Any) -> None:
         cap = dev.cap(cap_type)
