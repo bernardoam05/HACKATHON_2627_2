@@ -3,13 +3,23 @@ displayName: Hub de segurança
 purpose: security
 status: builtin
 capabilities:
+  # Pseudo-capability: not reported by the device; the executor writes it with
+  # patch_home_security_status. Always suggest.
   - type: securityStatus
-    description: Estado do alarme
+    description: "Armar/desarmar o alarme da casa (disarm/stay/away)"
     writable: true
     autonomy: suggest
-  - type: sirenSwitch
-    description: Sirene
-    writable: true
+  - type: alarmState
+    description: "Alarme a disparar (alarm) ou normal"
+    writable: false
     autonomy: suggest
+  - type: tamperState
+    description: "Adulteração do hub (alarm = adulterado)"
+    writable: false
+    autonomy: auto
+  - type: batteryLevel
+    description: Bateria (%)
+    writable: false
+    autonomy: auto
 starterAutomations:
   - Propor armar o alarme quando a casa fica vazia

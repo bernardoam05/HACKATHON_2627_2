@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from app.mcp_clients.base import McpClient
 from app.mcp_clients.sim import SimClient
@@ -41,6 +42,8 @@ class DeviceRegistry:
         self._rooms = rooms
         self._clients = clients
         self._cache: dict[DeviceSource, list[Device]] = {}
+        # Set by the wiring to the executor's manual path (validation + override feedback).
+        self.manual_handler: Callable[[str, CapabilityUpdate], Awaitable[Device]] | None = None
 
     # --- reading ----------------------------------------------------------------------------
 
@@ -107,7 +110,9 @@ class DeviceRegistry:
         return await self.get_device(device_id)
 
     async def set_capability(self, device_id: str, update: CapabilityUpdate) -> Device:
-        """Manual control from the UI."""
+        """Manual control from the UI: goes through the executor's manual path when wired."""
+        if self.manual_handler is not None:
+            return await self.manual_handler(device_id, update)
         return await self.write(device_id, update)
 
     async def write(self, device_id: str, update: CapabilityUpdate) -> Device:

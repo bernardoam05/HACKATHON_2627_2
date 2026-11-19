@@ -3,8 +3,16 @@ displayName: Sensor de temperatura
 purpose: environment
 status: builtin
 capabilities:
-  - type: temperature
+  - type: temperatureValue
     description: Temperatura (ºC)
+    writable: false
+    autonomy: auto
+  - type: humidityValue
+    description: Humidade relativa (%)
+    writable: false
+    autonomy: auto
+  - type: batteryLevel
+    description: Bateria (%)
     writable: false
     autonomy: auto
 starterAutomations: []

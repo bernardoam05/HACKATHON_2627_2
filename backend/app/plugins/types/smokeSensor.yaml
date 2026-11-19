@@ -3,8 +3,16 @@ displayName: Sensor de fumo
 purpose: security
 status: builtin
 capabilities:
-  - type: smoke
-    description: Fumo detetado
+  - type: sensorState
+    description: "Fumo: alarm = fumo detetado, normal = sem fumo"
+    writable: false
+    autonomy: auto
+  - type: tamperState
+    description: "Adulteração do sensor (alarm = adulterado)"
+    writable: false
+    autonomy: auto
+  - type: batteryStatus
+    description: "Bateria (low/medium/high)"
     writable: false
     autonomy: auto
 starterAutomations: []

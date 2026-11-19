@@ -58,8 +58,9 @@ async def build_services(
     insights = InsightEngine(
         repo, broadcast, settings.INSIGHT_MIN_CONFIDENCE, settings.REFLEX_MAX_UNDOS
     )
-    feedback = FeedbackService(repo, insights)
+    feedback = FeedbackService(repo, insights, broadcast)
     executor = Executor(registry, repo, plugins, broadcast, feedback)
+    registry.manual_handler = executor.manual
     reflexes = ReflexEngine(
         repo, registry, executor, plugins, broadcast, clock.now, settings.REFLEX_MIN_CONFIDENCE
     )

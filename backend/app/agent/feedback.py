@@ -5,10 +5,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
-from app.schemas import ActionRecord, ActionStatus, StateChange, UserFeedback
+from pydantic import BaseModel
+
+from app.schemas import ActionRecord, ActionStatus, ActionUpdatedMsg, StateChange, UserFeedback
 from app.storage.repository import Repository
 
 from .insights import InsightEngine
@@ -24,9 +27,15 @@ FeedbackKind = Literal["undo", "confirm", "reject", "manual_override"]
 class FeedbackService:
     """Record undo/confirm/reject/manual_override; cooldown per device."""
 
-    def __init__(self, repo: Repository, insights: InsightEngine | None = None) -> None:
+    def __init__(
+        self,
+        repo: Repository,
+        insights: InsightEngine | None = None,
+        broadcast: Callable[[BaseModel], Awaitable[None]] | None = None,
+    ) -> None:
         self._repo = repo
         self._insights = insights
+        self._broadcast = broadcast
         self._cooldown_until: dict[str, datetime] = {}
         self._overridden: set[str] = set()  # action ids already reported as overridden
 
@@ -55,21 +64,51 @@ class FeedbackService:
         user_changes = [c for c in changes if not c.causedByAgent and not c.capability.startswith("_")]
         if not user_changes:
             return []
-        now = datetime.now(UTC)
-        actions = await self._repo.actions_since(now - OVERRIDE_WINDOW)
-        executed = [a for a in actions if a.status == ActionStatus.executed]
+        executed = await self._recent_executed()
         for c in user_changes:
-            match = next(
-                (
-                    a for a in reversed(executed)
-                    if a.deviceId == c.deviceId and a.update.type == c.capability
-                    and a.createdAt <= c.at and a.id not in self._overridden
-                ),
-                None,
-            )
-            if match is None or c.new == match.expectedValue:
-                continue
-            self._overridden.add(match.id)
-            log.info("manual override of action %s on %s", match.id, c.deviceId)
-            await self.record(match, "manual_override", note=f"{c.capability} -> {c.new!r}")
+            await self._check_override(executed, c.deviceId, c.capability, c.new, c.at, "")
         return []
+
+    async def on_manual(self, device_id: str, capability: str, value: Any) -> None:
+        """Manual control from the app: checked right away, so a quick back-and-forth between
+        two polls is not missed."""
+        executed = await self._recent_executed()
+        await self._check_override(
+            executed, device_id, capability, value, datetime.now(UTC), " (via app)"
+        )
+
+    async def _recent_executed(self) -> list[ActionRecord]:
+        actions = await self._repo.actions_since(datetime.now(UTC) - OVERRIDE_WINDOW)
+        return [a for a in actions if a.status == ActionStatus.executed]
+
+    async def _check_override(
+        self,
+        executed: list[ActionRecord],
+        device_id: str,
+        capability: str,
+        value: Any,
+        at: datetime,
+        suffix: str,
+    ) -> None:
+        match = next(
+            (
+                a for a in reversed(executed)
+                if a.deviceId == device_id and a.update.type == capability
+                and a.createdAt <= at and a.id not in self._overridden
+            ),
+            None,
+        )
+        if match is None or value == match.expectedValue:
+            return
+        self._overridden.add(match.id)
+        log.info("manual override of action %s on %s%s", match.id, device_id, suffix)
+        await self.record(match, "manual_override", note=f"{capability} -> {value!r}{suffix}")
+        # The user reverted it: no longer an executed agent action, so anti-loop stops matching
+        # it (a value between the old one and the agent's target is not a fade any more) and the
+        # UI no longer offers Undo.
+        reverted = match.model_copy(
+            update={"status": ActionStatus.undone, "resolvedAt": datetime.now(UTC)}
+        )
+        await self._repo.save_action(reverted)
+        if self._broadcast is not None:
+            await self._broadcast(ActionUpdatedMsg(action=reverted))
