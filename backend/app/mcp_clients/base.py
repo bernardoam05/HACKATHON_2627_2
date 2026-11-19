@@ -13,6 +13,7 @@ from typing import Any
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.shared.exceptions import MCPError
 
 from app.schemas import CapabilityUpdate, Device, DeviceSource
 
@@ -122,6 +123,10 @@ class McpClient:
                 result = await asyncio.wait_for(
                     client.call_tool(tool, arguments or {}), self._timeout
                 )
+            except MCPError as e:
+                # The server answered with a JSON-RPC error (e.g. -32602 "tool not allowed for
+                # this client_type"): the session is fine, so keep it and report a tool error.
+                raise McpToolError(f"{tool}: [{e.code}] {e.message}") from e
             except Exception as e:
                 await self._reset()
                 raise McpUnavailable(f"{self._target_label()} {tool}: {e!r}") from e
