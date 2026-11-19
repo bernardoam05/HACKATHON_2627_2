@@ -25,6 +25,7 @@ from .agent import Clock, HomeAgent
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
+from .onboarding import Onboarding
 from .reflexes import ReflexEngine
 from .tools import PresenceWatcher
 
@@ -50,7 +51,8 @@ async def build_services(
 
     rooms = RoomStore(repo)
     registry = DeviceRegistry(repo, rooms, clients)
-    plugins = PluginRegistry(repo, devices=registry.list_devices)
+    onboarding = Onboarding(model or settings.AGENT_MODEL)
+    plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
     clock = Clock(settings.NOW_OVERRIDE)
     insights = InsightEngine(

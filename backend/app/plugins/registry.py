@@ -32,6 +32,18 @@ SECURITY_CAPABILITIES = frozenset(
     }
 )
 
+# Substrings that make an unknown capability security-sensitive (conservative on purpose).
+SECURITY_KEYWORDS = ("alarm", "siren", "record", "lock", "security", "arm")
+
+
+def is_security_capability(cap_type: str) -> bool:
+    """Alarm / siren / camera recording / locks: always `suggest`, whatever a plugin says."""
+    if cap_type in SECURITY_CAPABILITIES:
+        return True
+    low = cap_type.lower()
+    return any(k in low for k in SECURITY_KEYWORDS if k != "arm") or low.startswith("arm")
+
+
 DevicesProvider = Callable[[], Awaitable[list[Device]]]
 Proposer = Callable[[Device], Awaitable[PluginProposal]]
 
@@ -63,7 +75,7 @@ class PluginRegistry:
         return self._builtin.get(type)
 
     async def resolve_autonomy(self, device: Device, cap_type: str) -> AutonomyLevel:
-        if cap_type in SECURITY_CAPABILITIES:
+        if is_security_capability(cap_type):
             return AutonomyLevel.suggest
         plugin = await self.get(device.type)
         if plugin is not None:
@@ -104,7 +116,7 @@ class PluginRegistry:
             raise ValueError(f"plugin.type '{plugin.type}' does not match path type '{type}'")
         confirmed = plugin.model_copy(update={"status": PluginStatus.confirmed})
         for spec in confirmed.capabilities:
-            if spec.type in SECURITY_CAPABILITIES:
+            if is_security_capability(spec.type):
                 spec.autonomy = AutonomyLevel.suggest
         await self._repo.save_plugin(confirmed)
         return confirmed
