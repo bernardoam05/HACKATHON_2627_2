@@ -115,7 +115,7 @@ Service errors map to HTTP status codes in `main.py` (body `{"detail": str}`):
 - `{"type":"insight_updated","insight":Insight}`
 - `{"type":"reflex_proposed"|"reflex_updated","reflex":Reflex}` → UI asks user to confirm a proposed reflex
 - `{"type":"reflex_executed","reflexId":str,"actions":ActionRecord[]}`
-- `{"type":"cooldown_started","cooldown":DeviceCooldown}` → the user overrode the agent: UI shows `note` and the options (keep, shorter/longer, until unblocked, unblock now, remember for this device). The overridden action also arrives as `action_updated` with status `undone`.
+- `{"type":"cooldown_started","cooldown":DeviceCooldown}` → the user overrode the agent: UI shows `note` and the options (keep, shorter/longer, until unblocked, unblock now, remember for this device). The overridden action also arrives as `action_updated` with status `undone`. Also sent again (same `deviceId`, replace the previous one) when the user changes a block with PUT.
 - `{"type":"cooldown_ended","deviceId":str,"reason":"expired"|"user"}`
 
 ### 5.7 Simulator MCP — `simulator/` (Team B), consumed by `mcp_clients/sim.py` (Team A)
