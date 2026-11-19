@@ -29,7 +29,8 @@ class _Unimplemented:
 
 def unimplemented_services() -> Services:
     u = _Unimplemented()
-    return Services(devices=u, rooms=u, sim=u, plugins=u, agent=u, actions=u, history=u)
+    return Services(devices=u, rooms=u, sim=u, plugins=u, agent=u, actions=u, history=u,
+                    cooldowns=u)
 
 
 async def build_real_services(settings: Settings) -> Services:

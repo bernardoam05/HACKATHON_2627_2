@@ -21,6 +21,8 @@ EXPECTED = {
     ("get", "/api/reflexes"), ("post", "/api/reflexes/{reflex_id}/confirm"),
     ("post", "/api/reflexes/{reflex_id}/pause"), ("post", "/api/reflexes/{reflex_id}/resume"),
     ("delete", "/api/reflexes/{reflex_id}"),
+    ("get", "/api/cooldowns"), ("put", "/api/cooldowns/{device_id}"),
+    ("delete", "/api/cooldowns/{device_id}"),
 }
 
 
@@ -103,6 +105,34 @@ def test_real_services_wired(monkeypatch):
         assert c.get("/api/devices/nope").status_code == 404
         assert c.post("/api/actions/nope/confirm").status_code == 404
         assert c.get("/api/agent/status").status_code == 200
+    get_settings.cache_clear()
+
+
+def test_fake_cooldowns_options(client):
+    [cd] = client.get("/api/cooldowns").json()
+    assert cd["reason"] == "manual_override" and cd["note"]
+    dev = cd["deviceId"]
+
+    shorter = client.put(f"/api/cooldowns/{dev}", json={"minutes": 5, "rememberForDevice": True})
+    assert shorter.status_code == 200 and shorter.json()["defaultMinutes"] == 5
+    forever = client.put(f"/api/cooldowns/{dev}", json={"untilUnblocked": True})
+    assert forever.status_code == 200 and forever.json()["until"] is None
+    assert client.delete(f"/api/cooldowns/{dev}").status_code == 204
+    assert client.get("/api/cooldowns").json() == []
+
+    for bad in ({}, {"minutes": 5, "untilUnblocked": True},
+                {"untilUnblocked": True, "rememberForDevice": True}, {"minutes": -1}):
+        assert client.put(f"/api/cooldowns/{dev}", json=bad).status_code == 422, bad
+    assert client.put("/api/cooldowns/nope", json={"minutes": 5}).status_code == 404
+
+
+def test_cooldowns_501_when_not_wired(monkeypatch):
+    u = main.unimplemented_services()
+    services = Services(devices=u.devices, rooms=u.rooms, sim=u.sim, plugins=u.plugins,
+                        agent=u.agent, actions=u.actions, history=u.history)  # no cooldowns
+    _real_mode(monkeypatch, services)
+    with TestClient(app) as c:
+        assert c.get("/api/cooldowns").status_code == 501
     get_settings.cache_clear()
 
 

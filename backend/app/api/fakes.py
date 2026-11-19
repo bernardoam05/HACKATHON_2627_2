@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +14,13 @@ from app.schemas import (
     CapabilityUpdate,
     ChatRequest,
     ChatResponse,
+    CooldownReason,
+    CooldownUpdate,
     Decision,
     DecisionTrigger,
     Device,
     DeviceAssignment,
+    DeviceCooldown,
     DevicePlugin,
     DevicePurpose,
     DeviceSource,
@@ -85,6 +88,41 @@ class FakeBackend:
         }
         self._insights: dict[str, Insight] = {}
         self._reflexes: dict[str, Reflex] = {}
+        # One sample block so the UI can render the override notice and its options.
+        self._cooldowns: dict[str, DeviceCooldown] = {
+            first: DeviceCooldown(
+                deviceId=first, until=_now() + timedelta(minutes=20),
+                reason=CooldownReason.manual_override, actionId="act-1", capability="brightness",
+                note="Baixei a luz para 30, mas voltaste a pô-la a 90. Não lhe mexo durante 20 min.",
+                startedAt=_now(), defaultMinutes=20,
+            )
+        }
+        self._cooldown_defaults: dict[str, float] = {}
+
+    # CooldownService
+    async def list_cooldowns(self) -> list[DeviceCooldown]:
+        now = _now()
+        return [c for c in self._cooldowns.values() if c.until is None or c.until > now]
+
+    async def update_cooldown(self, device_id: str, body: CooldownUpdate) -> DeviceCooldown:
+        if device_id not in self._devices:
+            raise KeyError(device_id)
+        if body.rememberForDevice and body.minutes is not None:
+            self._cooldown_defaults[device_id] = body.minutes
+        default = self._cooldown_defaults.get(device_id, 20)
+        current = self._cooldowns.get(device_id) or DeviceCooldown(
+            deviceId=device_id, reason=CooldownReason.user, startedAt=_now(),
+            defaultMinutes=default)
+        until = None if body.untilUnblocked else _now() + timedelta(minutes=body.minutes or 0)
+        updated = current.model_copy(update={"until": until, "defaultMinutes": default})
+        if body.minutes == 0:
+            self._cooldowns.pop(device_id, None)
+        else:
+            self._cooldowns[device_id] = updated
+        return updated
+
+    async def clear_cooldown(self, device_id: str) -> None:
+        self._cooldowns.pop(device_id, None)
 
     # DeviceService
     async def list_devices(self) -> list[Device]:
@@ -214,4 +252,5 @@ class FakeBackend:
 
 def build_fake_services() -> Services:
     b = FakeBackend()
-    return Services(devices=b, rooms=b, sim=b, plugins=b, agent=b, actions=b, history=b)
+    return Services(devices=b, rooms=b, sim=b, plugins=b, agent=b, actions=b, history=b,
+                    cooldowns=b)
