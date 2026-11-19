@@ -33,13 +33,19 @@ export function Expandable({ summary, children, defaultOpen = false, className =
   );
 }
 
-/** Label above a control; `hint` is a short muted line below. */
-export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+/** Label above a control; `hint` is a short muted line below, replaced by `error` when set. */
+export function Field({ label, hint, error, children }: {
+  label: ReactNode;
+  hint?: ReactNode;
+  error?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <label className="grid gap-1 text-sm">
       <span className="font-medium">{label}</span>
       {children}
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+      {error ? <span className="text-xs text-bad" role="alert">{error}</span>
+        : hint && <span className="text-xs text-muted">{hint}</span>}
     </label>
   );
 }

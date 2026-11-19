@@ -5,7 +5,7 @@ import type { Room } from "../../api/types";
 import { useDevices } from "../../live/DevicesProvider";
 import { useRooms } from "../../live/RoomsProvider";
 import { errorMessage } from "../../lib/useResource";
-import { Badge, Button, Card, Empty, ErrorNote, Field, inputClass, Loading } from "../../ui";
+import { Badge, Button, Card, Empty, ErrorNote, Field, inputClass, Loading, normalize } from "../../ui";
 
 export default function RoomEditor() {
   const { rooms, loading, error, reload } = useRooms();
@@ -64,15 +64,17 @@ function RoomRow({ room, devices }: { room: Room; devices: number }) {
 }
 
 function AddRoom() {
-  const { add } = useRooms();
+  const { add, rooms } = useRooms();
   const [name, setName] = useState("");
   const [isEntrance, setIsEntrance] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
+  const duplicate = Boolean(name.trim()) && rooms.some((r) => normalize(r.name) === normalize(name));
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || duplicate) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -90,12 +92,12 @@ function AddRoom() {
     <form onSubmit={submit} className="mb-4 grid gap-2">
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-48 flex-1">
-          <Field label="Nova divisão">
+          <Field label="Nova divisão" error={duplicate && "Já existe uma divisão com este nome."}>
             <input className={inputClass} value={name} placeholder="ex. Cozinha"
                    onChange={(e) => setName(e.target.value)} />
           </Field>
         </div>
-        <Button type="submit" variant="primary" disabled={busy || !name.trim()}>Criar</Button>
+        <Button type="submit" variant="primary" disabled={busy || !name.trim() || duplicate}>Criar</Button>
       </div>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" className="size-4 accent-accent" checked={isEntrance}

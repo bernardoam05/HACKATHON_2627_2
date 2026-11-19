@@ -28,9 +28,7 @@ export default function DeviceList() {
 
   return (
     <Card title="Dispositivos" actions={
-      <Button variant={adding ? "secondary" : "primary"} onClick={() => setAdding((a) => !a)}>
-        {adding ? "Fechar" : "Adicionar simulado"}
-      </Button>
+      !adding && <Button variant="primary" onClick={() => setAdding(true)}>Adicionar simulado</Button>
     }>
       {adding && <AddSimDevice onDone={() => setAdding(false)} />}
       {error ? <ErrorNote message={error} onRetry={reload} />
@@ -58,6 +56,27 @@ export default function DeviceList() {
 export function displayName(d: Device): string {
   return d.alias || d.name || d.id;
 }
+
+/** Names already used by other devices (original name and alias), compared without case/accents. */
+function namesInUse(devices: Device[], exceptId?: string): Set<string> {
+  const used = new Set<string>();
+  for (const d of devices) {
+    if (d.id === exceptId) continue;
+    if (d.name) used.add(normalize(d.name));
+    if (d.alias) used.add(normalize(d.alias));
+  }
+  return used;
+}
+
+/** "Lâmpada" -> "Lâmpada 2" when taken, so the suggested default is always valid. */
+function uniqueName(base: string, used: Set<string>): string {
+  if (!base || !used.has(normalize(base))) return base;
+  let n = 2;
+  while (used.has(normalize(`${base} ${n}`))) n++;
+  return `${base} ${n}`;
+}
+
+const DUPLICATE_NAME = "Já existe um dispositivo com este nome.";
 
 function cap(d: Device, type: string): Capability | undefined {
   return d.capabilities.find((c) => c.type === type);
@@ -167,7 +186,7 @@ function QuickControls({ device }: { device: Device }) {
 }
 
 function EditDevice({ device }: { device: Device }) {
-  const { upsert } = useDevices();
+  const { upsert, devices } = useDevices();
   const { rooms } = useRooms();
   const [alias, setAlias] = useState(device.alias ?? "");
   const [roomId, setRoomId] = useState(device.roomId ?? "");
@@ -177,9 +196,11 @@ function EditDevice({ device }: { device: Device }) {
   const [saved, setSaved] = useState(false);
 
   const dirty = alias !== (device.alias ?? "") || roomId !== (device.roomId ?? "") || enabled !== device.enabled;
+  const duplicate = Boolean(alias.trim()) && namesInUse(devices, device.id).has(normalize(alias));
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    if (duplicate) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -195,7 +216,8 @@ function EditDevice({ device }: { device: Device }) {
   return (
     <form onSubmit={save} className="grid gap-3 rounded-lg border border-line bg-surface p-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Nome a mostrar" hint={`Nome original: ${device.name || device.id}`}>
+        <Field label="Nome a mostrar" hint={`Nome original: ${device.name || device.id}`}
+               error={duplicate && DUPLICATE_NAME}>
           <input className={inputClass} value={alias} placeholder={device.name}
                  onChange={(e) => { setAlias(e.target.value); setSaved(false); }} />
         </Field>
@@ -213,7 +235,7 @@ function EditDevice({ device }: { device: Device }) {
         Ativo <span className="text-muted">(a casa só observa e controla dispositivos ativos)</span>
       </label>
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={busy || !dirty}>Guardar</Button>
+        <Button type="submit" variant="primary" disabled={busy || !dirty || duplicate}>Guardar</Button>
         {saved && !dirty && <span className="text-sm text-good">Guardado</span>}
       </div>
       {error && <ErrorNote message={error} />}
@@ -300,7 +322,7 @@ function toCapability(c: CapDraft): Capability {
 type Choice = { kind: "template"; id: string } | { kind: "new"; label: string };
 
 function AddSimDevice({ onDone }: { onDone: () => void }) {
-  const { upsert } = useDevices();
+  const { upsert, devices } = useDevices();
   const { rooms } = useRooms();
   const templates = useResource(api.templates);
   const [choice, setChoice] = useState<Choice | null>(null);
@@ -317,8 +339,19 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
 
   const capIds = caps.map((c) => toTypeId(c.name)).filter(Boolean);
   const capsValid = capIds.length > 0 && capIds.length === caps.length && new Set(capIds).size === capIds.length;
-  const valid = choice?.kind === "template" ? Boolean(tpl) : choice?.kind === "new" && Boolean(newType) && capsValid;
-  const defaultName = tpl?.name ?? (choice?.kind === "new" ? choice.label : "");
+
+  // A "new" type must really be new: not a template's type nor a type already in the house.
+  const knownTypes = new Set([...list.map((t) => t.type), ...devices.map((d) => d.type)].map(normalize));
+  const typeTaken = Boolean(newType) && knownTypes.has(normalize(newType));
+
+  const used = namesInUse(devices);
+  const defaultName = uniqueName(tpl?.name ?? (choice?.kind === "new" ? choice.label : ""), used);
+  const finalName = name.trim() || defaultName;
+  const nameTaken = Boolean(name.trim()) && used.has(normalize(name));
+
+  const valid = !nameTaken && Boolean(finalName) && (choice?.kind === "template"
+    ? Boolean(tpl)
+    : choice?.kind === "new" && Boolean(newType) && !typeTaken && capsValid);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -326,7 +359,7 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(undefined);
     try {
-      const common = { name: name.trim() || defaultName, roomId: roomId || null };
+      const common = { name: finalName, roomId: roomId || null };
       upsert(await api.addSimDevice(tpl
         ? { ...common, type: tpl.type, template: tpl.id }
         : { ...common, type: newType, template: null, capabilities: caps.map(toCapability) }));
@@ -339,19 +372,26 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={submit} className="mb-4 grid gap-3 rounded-lg border border-line bg-canvas p-3">
-      <p className="m-0 text-sm text-muted">
-        Cria um dispositivo na casa simulada. Um tipo que a casa não conhece pede configuração a seguir.
-      </p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="grid gap-0.5">
+          <h3 className="m-0 text-sm font-semibold">Novo dispositivo simulado</h3>
+          <p className="m-0 text-sm text-muted">
+            Um tipo que a casa não conhece pede configuração a seguir.
+          </p>
+        </div>
+        <Button type="button" onClick={onDone}>Fechar</Button>
+      </div>
       {templates.error ? <ErrorNote message={templates.error} onRetry={templates.reload} /> : (
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Tipo" hint={choice?.kind === "new" ? `Tipo novo: ${newType || "—"}` : undefined}>
+          <Field label="Tipo" hint={choice?.kind === "new" ? `Tipo novo: ${newType || "—"}` : undefined}
+                 error={typeTaken && `O tipo "${newType}" já existe. Escolhe-o na lista.`}>
             <Combobox ariaLabel="Tipo" options={options} placeholder="Procurar tipo…"
                       value={choice?.kind === "template" ? choice.id : null}
                       onSelect={(id) => setChoice({ kind: "template", id })}
                       onCreate={(label) => setChoice({ kind: "new", label })}
                       createLabel={(q) => `Adicionar tipo novo "${q}"`} />
           </Field>
-          <Field label="Nome">
+          <Field label="Nome" error={nameTaken && DUPLICATE_NAME}>
             <input className={inputClass} value={name} placeholder={defaultName}
                    onChange={(e) => setName(e.target.value)} />
           </Field>
@@ -364,9 +404,8 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
         </div>
       )}
       {choice?.kind === "new" && <NewTypeCapabilities caps={caps} onChange={setCaps} />}
-      <div className="flex gap-2">
+      <div>
         <Button type="submit" variant="primary" disabled={busy || !valid}>Adicionar</Button>
-        <Button type="button" onClick={onDone}>Cancelar</Button>
       </div>
       {error && <ErrorNote message={error} />}
     </form>
