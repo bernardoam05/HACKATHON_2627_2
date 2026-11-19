@@ -10,12 +10,13 @@ const TRIGGER_LABEL: Record<DecisionTrigger, string> = {
   reflex_report: "Reflexo",
 };
 
-export function DecisionCard({ decision, showTrigger = true }: { decision: Decision; showTrigger?: boolean }) {
+export function DecisionCard({ decision, showTrigger = true, showExplanation = true }:
+  { decision: Decision; showTrigger?: boolean; showExplanation?: boolean }) {
   const label = useDeviceLabel();
   const { explanation, inferredRoom, inferredActivity, actions, confidence } = decision;
   return (
     <article className="grid gap-2 rounded-lg border border-line bg-canvas p-3">
-      <p className="m-0">{explanation}</p>
+      {showExplanation && <p className="m-0">{explanation}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
         {showTrigger && <Badge>{TRIGGER_LABEL[decision.trigger]}</Badge>}
         {inferredRoom && <Badge tone="accent">📍 {inferredRoom}</Badge>}

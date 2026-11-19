@@ -8,7 +8,8 @@ import {
   useAuiState,
   useLocalRuntime,
 } from "@assistant-ui/react";
-import { useMemo } from "react";
+import { useId, useMemo, useState } from "react";
+import type { Decision } from "../../api/types";
 import { DecisionCard } from "../decisions/DecisionCard";
 import { chatAdapter, decisionOf } from "./chatAdapter";
 import { createDictation, dictationSupported } from "./useVoice";
@@ -22,18 +23,31 @@ const SUGGESTIONS = [
 export default function ChatPage() {
   const dictation = useMemo(createDictation, []);
   const runtime = useLocalRuntime(chatAdapter, { adapters: { dictation } });
+  const clear = () => {
+    if (runtime.thread.getState().isRunning) runtime.thread.cancelRun();
+    runtime.thread.reset();
+  };
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
+      <Thread onClear={clear} />
     </AssistantRuntimeProvider>
   );
 }
 
-function Thread() {
+function Thread({ onClear }: { onClear: () => void }) {
   return (
     <ThreadPrimitive.Root
       className="flex h-[calc(100dvh-7.5rem)] min-h-[320px] flex-col overflow-hidden rounded-xl border border-line
                  bg-surface shadow-sm sm:h-[calc(100dvh-10rem)] sm:min-h-[420px]">
+      <ThreadPrimitive.If empty={false}>
+        <div className="flex justify-end border-b border-line px-2.5 py-1.5">
+          <button type="button" onClick={onClear}
+            className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted hover:bg-surface-2 hover:text-ink
+                       focus-visible:outline-2 focus-visible:outline-accent">
+            🗑 Limpar conversa
+          </button>
+        </div>
+      </ThreadPrimitive.If>
       <ThreadPrimitive.Viewport className="flex flex-1 flex-col gap-3 overflow-y-auto p-3.5 sm:p-4">
         <ThreadPrimitive.Empty>
           <Welcome />
@@ -82,19 +96,46 @@ function AssistantMessage() {
   const custom = useAuiState(({ message }) => message.metadata.custom);
   const running = useAuiState(({ message }) => message.status?.type === "running");
   const decision = decisionOf(custom);
+  // The agent's explanation is the answer; the raw reply is only a fallback when there is no decision.
+  const answer = decision?.explanation.trim();
   return (
     <MessagePrimitive.Root className="flex max-w-[92%] flex-col gap-2 sm:max-w-[85%]">
       <div className="whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm bg-surface-2 px-3.5 py-2
                       text-[15px]">
-        {running ? <span className="text-muted motion-safe:animate-pulse">A pensar…</span> : <MessagePrimitive.Parts />}
+        {running
+          ? <span className="text-muted motion-safe:animate-pulse">A pensar…</span>
+          : answer || <MessagePrimitive.Parts />}
         <MessagePrimitive.Error>
           <ErrorPrimitive.Root className="text-bad">
             Não consegui falar com a casa. <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
       </div>
-      {decision && decision.actions.length > 0 && <DecisionCard decision={decision} showTrigger={false} />}
+      {decision && <DecisionDetails decision={decision} />}
     </MessagePrimitive.Root>
+  );
+}
+
+/** Collapsed by default: an arrow opens what the agent inferred (room, activity, confidence) and its actions. */
+function DecisionDetails({ decision }: { decision: Decision }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const n = decision.actions.length;
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
+        className="flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-sm text-muted hover:text-ink
+                   focus-visible:outline-2 focus-visible:outline-accent">
+        <svg viewBox="0 0 20 20" aria-hidden="true"
+             className={`size-4 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}>
+          <path d="M7 5l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Detalhes{n > 0 && ` · ${n} ${n === 1 ? "ação" : "ações"}`}
+      </button>
+      <div id={id} hidden={!open} className="mt-1.5">
+        <DecisionCard decision={decision} showTrigger={false} showExplanation={false} />
+      </div>
+    </div>
   );
 }
 
