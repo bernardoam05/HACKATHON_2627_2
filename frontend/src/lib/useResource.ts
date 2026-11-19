@@ -1,5 +1,6 @@
 // Owner: Team B. Load data from the REST API with loading/error state and manual reload.
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { ApiError } from "../api/client";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -32,10 +33,17 @@ export function useResource<T>(load: () => Promise<T>, deps: readonly unknown[] 
   return { data, error, loading, reload, setData };
 }
 
+/** PT-PT message for the user, following the backend's status codes (docs/CONTRACTS.md 5.5). */
 export function errorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 501) return "Ainda não implementado no backend.";
+    if (e.status === 404) return "Isto já não existe. Atualiza a página.";
+    // 409: the backend explains the conflict (e.g. action no longer pending); its detail is in English.
+    if (e.status === 409) return "Isto já mudou entretanto. Atualiza para ver o estado atual.";
+    if (e.status >= 500) return "O servidor teve um problema. Tenta outra vez.";
+    return e.detail ?? `Pedido recusado (${e.status}).`;
+  }
   const text = e instanceof Error ? e.message : String(e);
-  if (text.endsWith("-> 501")) return "Ainda não implementado no backend.";
-  if (/-> 5\d\d$/.test(text)) return "O servidor teve um problema. Tenta outra vez.";
-  if (text.includes("Failed to fetch")) return "Sem ligação ao servidor.";
+  if (text.includes("Failed to fetch") || text.includes("NetworkError")) return "Sem ligação ao servidor.";
   return text;
 }

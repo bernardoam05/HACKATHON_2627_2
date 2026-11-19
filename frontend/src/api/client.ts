@@ -5,13 +5,30 @@ import type {
   SimDeviceCreate, StateChange,
 } from "./types";
 
+/** A non-2xx response. `detail` is the backend's reason ({"detail": str}, see docs/CONTRACTS.md 5.5). */
+export class ApiError extends Error {
+  constructor(readonly status: number, readonly detail: string | undefined, method: string, path: string) {
+    super(`${method} ${path} -> ${status}${detail ? `: ${detail}` : ""}`);
+    this.name = "ApiError";
+  }
+}
+
 async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}`);
+  if (!res.ok) {
+    let detail: string | undefined;
+    try {
+      const data = (await res.json()) as { detail?: unknown };
+      if (typeof data.detail === "string") detail = data.detail;
+    } catch {
+      // no JSON body
+    }
+    throw new ApiError(res.status, detail, method, path);
+  }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
