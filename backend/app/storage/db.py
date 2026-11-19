@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS reflexes (
 CREATE TABLE IF NOT EXISTS reflex_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, reflex_id TEXT NOT NULL,
     action_ids TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS device_cooldowns (
+    device_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cooldown_defaults (
+    device_id TEXT PRIMARY KEY, minutes REAL NOT NULL);
 """
 
 

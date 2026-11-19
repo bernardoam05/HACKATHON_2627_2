@@ -212,9 +212,9 @@ async def test_s2_reflex_learned_confirmed_and_auto_paused(home):
     for dev, cap, val in [("k_light", "power", "on"), ("c_light", "power", "off"),
                           ("motion1", "motionDetected", False)]:
         await step(services, srv, dev, cap, val)
-    # Turning the corridor light off by hand overrides the agent (D9): let the cooldown pass.
+    # Turning the corridor light off by hand overrides the agent (D9): the user unblocks it.
     assert services.feedback.in_cooldown("c_light")
-    services.feedback._cooldown_until.clear()
+    await services.feedback.clear_cooldown("c_light")
     await services.agent.confirm_reflex(proposed.id)
 
     # Next walk: the reflex fires inside the poll, before the agent runs
