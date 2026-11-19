@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import json
+import os
 
 from pydantic_ai.exceptions import ModelHTTPError, ModelQuotaExceededError, ModelUnavailableError
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from test_devices_poller import fake_server, sim_devices
 
-from app.agent.agent import is_transient_llm_error
-from app.agent.wiring import build_services
+from app.agent.agent import AUTO_MODELS, build_model, is_transient_llm_error, model_names
+from app.agent.wiring import build_services, export_agent_api_key
 from app.config import Settings
 from app.mcp_clients.sim import SimClient
 from app.schemas import DeviceSource
@@ -42,11 +44,11 @@ class Flaky:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, json.dumps(out))])
 
 
-async def run_once(flaky: Flaky):
+async def run_once(flaky: Flaky, model=None):
     srv = fake_server(sim_devices(), with_sim_tools=True)
     settings = Settings(DB_PATH=":memory:", ALTICE_MCP_URL="", SIM_MCP_URL="")
     services = await build_services(
-        settings, clients={DeviceSource.sim: SimClient(srv)}, model=FunctionModel(flaky)
+        settings, clients={DeviceSource.sim: SimClient(srv)}, model=model or FunctionModel(flaky)
     )
     services.scheduler._min_gap = 0
     services.agent.retry_delays = (0, 0, 0)
@@ -78,3 +80,39 @@ async def test_gives_up_after_the_last_retry_and_keeps_the_changes():
     assert flaky.calls == 4 and decisions == []  # 1 attempt + 3 retries
     # The cutoff did not advance: the next run still sees the TV change.
     assert services.agent._last_cutoff is None
+
+
+# --- AGENT_MODEL: one model, a fallback list, or `auto` ---------------------------------------
+
+
+def test_model_spec_parsing():
+    assert model_names("google:gemini-3.8-flash") == ["google:gemini-3.8-flash"]
+    assert model_names(" google:a , google:b ") == ["google:a", "google:b"]
+    assert model_names("auto") == list(AUTO_MODELS)
+    assert AUTO_MODELS[0].endswith("flash-lite")  # most daily headroom first
+    assert build_model("google:gemini-3.8-flash") == "google:gemini-3.8-flash"  # stays lazy
+    assert isinstance(build_model("test,test"), FallbackModel)
+
+
+async def test_fallback_model_takes_over_when_the_first_is_overloaded():
+    overloaded = Flaky(99, ModelUnavailableError("gemini-3.8-flash", "503 high demand"))
+    backup = Flaky(0, RuntimeError("unused"))
+    decisions, _ = await run_once(
+        overloaded, model=FallbackModel(FunctionModel(overloaded), FunctionModel(backup))
+    )
+    assert len(decisions) == 1
+    assert overloaded.calls == 1 and backup.calls == 1  # switched at once, no retry wait
+
+
+async def test_whole_chain_failing_transiently_is_retried():
+    a = Flaky(1, ModelUnavailableError("a", "503"))
+    b = Flaky(1, ModelQuotaExceededError("b", "quota", retry_after=1))
+    decisions, _ = await run_once(a, model=FallbackModel(FunctionModel(a), FunctionModel(b)))
+    assert len(decisions) == 1 and a.calls == 2  # group was transient -> second pass, `a` answers
+
+
+def test_exported_key_for_auto(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "placeholder")
+    monkeypatch.delenv("GEMINI_API_KEY")
+    assert export_agent_api_key(Settings(AGENT_MODEL="auto", AGENT_API_KEY="k")) == "GEMINI_API_KEY"
+    assert os.environ["GEMINI_API_KEY"] == "k"

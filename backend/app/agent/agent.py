@@ -21,6 +21,7 @@ from pydantic_ai.exceptions import (
     ModelUnavailableError,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.models.fallback import FallbackModel
 
 from app.config import Settings
 from app.devices.registry import DeviceRegistry
@@ -64,7 +65,10 @@ TRANSIENT_HTTP = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 def is_transient_llm_error(exc: BaseException) -> bool:
     """Worth retrying: overloaded/rate-limited provider or network trouble.
     Not retried: bad key (401/403), unknown model, invalid request, our own bugs, and an
-    exhausted quota (429 "check your plan and billing", no Retry-After): waiting won't help."""
+    exhausted quota (429 "check your plan and billing", no Retry-After): waiting won't help.
+    A FallbackModel raises a group with one error per model: transient if any of them is."""
+    if isinstance(exc, BaseExceptionGroup):
+        return any(is_transient_llm_error(e) for e in exc.exceptions)
     if isinstance(exc, ModelQuotaExceededError):
         return getattr(exc, "retry_after", None) is not None  # per-minute limit: yes; plan: no
     if isinstance(exc, ModelUnavailableError):
@@ -79,11 +83,42 @@ def is_transient_llm_error(exc: BaseException) -> bool:
 
 
 def _retry_after(exc: BaseException) -> float | None:
+    if isinstance(exc, BaseExceptionGroup):
+        waits = [w for e in exc.exceptions if (w := _retry_after(e)) is not None]
+        return min(waits) if waits else None
     value = getattr(exc, "retry_after", None)
     try:
         return min(float(value), MAX_RETRY_AFTER) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+# AGENT_MODEL=auto: Google models in order of daily headroom on the free tier (Flash Lite:
+# 15 RPM / 500 RPD each), then the Flash models (5 RPM / 20 RPD each) as extra reserve.
+AUTO_MODELS: tuple[str, ...] = (
+    "google:gemini-3.5-flash-lite",
+    "google:gemini-3.1-flash-lite",
+    "google:gemini-3.8-flash",
+    "google:gemini-3.6-flash",
+    "google:gemini-3-flash",
+    "google:gemini-2.5-flash",
+)
+
+
+def model_names(spec: str) -> list[str]:
+    """AGENT_MODEL: one model, a comma-separated fallback list, or `auto`."""
+    if spec.strip().lower() == "auto":
+        return list(AUTO_MODELS)
+    return [m.strip() for m in spec.split(",") if m.strip()]
+
+
+def build_model(spec: str) -> Model | str:
+    """One name -> that model. Several -> FallbackModel: on any API error (503 overloaded,
+    429 quota, network) the next model is tried at once; each Gemini model has its own quota."""
+    names = model_names(spec)
+    if len(names) <= 1:
+        return names[0] if names else spec
+    return FallbackModel(*names)
 
 
 class WakeUp(BaseModel):
@@ -208,9 +243,9 @@ class HomeAgent:
             repo, settings.FULL_SNAPSHOT_EVERY_RUNS, settings.FULL_SNAPSHOT_EVERY_SECONDS
         )
         self.clock = clock or Clock(settings.NOW_OVERRIDE)
-        self._model_name = str(model or settings.AGENT_MODEL)
+        self._model_name = str(model) if model else ",".join(model_names(settings.AGENT_MODEL))
         self._agent: Agent[AgentDeps, AgentOutput] = Agent(
-            model or settings.AGENT_MODEL,
+            model or build_model(settings.AGENT_MODEL),
             deps_type=AgentDeps,
             output_type=AgentOutput,
             instructions=instructions(settings.REFLEX_MIN_CONFIDENCE),

@@ -24,7 +24,7 @@ from app.schemas import AgentStatusMsg, DeviceSource
 from app.storage.db import init_db
 from app.storage.repository import Repository
 
-from .agent import Clock, HomeAgent
+from .agent import Clock, HomeAgent, build_model, model_names
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
@@ -50,18 +50,23 @@ PROVIDER_KEY_ENV = {
 
 
 def export_agent_api_key(settings: Settings) -> str | None:
-    """Make AGENT_API_KEY visible to the provider SDK. A variable already set in the real
-    environment wins. Returns the env var name used (None if nothing to do)."""
+    """Make AGENT_API_KEY visible to the provider SDK(s) of AGENT_MODEL (one model, a list or
+    `auto`). A variable already set in the real environment wins. Returns the env var names
+    used, comma-separated (None if nothing to do)."""
     if not settings.AGENT_API_KEY:
         return None
-    provider = settings.AGENT_MODEL.split(":", 1)[0] if ":" in settings.AGENT_MODEL else ""
-    var = PROVIDER_KEY_ENV.get(provider)
-    if var is None:
-        log.warning("AGENT_API_KEY set but provider %r is unknown; export its key yourself",
-                    provider)
-        return None
-    os.environ.setdefault(var, settings.AGENT_API_KEY)
-    return var
+    exported: list[str] = []
+    for name in model_names(settings.AGENT_MODEL):
+        provider = name.split(":", 1)[0] if ":" in name else ""
+        var = PROVIDER_KEY_ENV.get(provider)
+        if var is None:
+            log.warning("AGENT_API_KEY set but provider %r is unknown; export its key yourself",
+                        provider)
+            continue
+        os.environ.setdefault(var, settings.AGENT_API_KEY)
+        if var not in exported:
+            exported.append(var)
+    return ",".join(exported) or None
 
 
 async def build_services(
@@ -89,7 +94,7 @@ async def build_services(
 
     rooms = RoomStore(repo)
     registry = DeviceRegistry(repo, rooms, clients)
-    onboarding = Onboarding(model or settings.AGENT_MODEL)
+    onboarding = Onboarding(model or build_model(settings.AGENT_MODEL))
     plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
     clock = Clock(settings.NOW_OVERRIDE)
