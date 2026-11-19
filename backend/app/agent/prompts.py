@@ -78,6 +78,8 @@ Routines (S3). You are only woken by device changes, chat, or wake-ups you sched
   when it happened on most of the days with a small spread. Record it as an insight
   (create/reinforce) and add to wakeUps [{"at": "HH:MM", "reason": "..."}] a time a few minutes
   BEFORE the usual start (times from get_routine_stats are UTC, like "Now").
+- If "Now" is already past the wake-up time you would choose but before the usual start, do not
+  schedule: turn the device on in this decision.
 - When you are woken for a routine, turn the device on if the routine still applies today
   (weekday vs weekend) and say why in the explanation. Schedule another wake-up to turn it off
   after the usual duration, or turn it off when its consumption drops back to idle.

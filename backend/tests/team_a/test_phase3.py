@@ -110,7 +110,10 @@ async def test_wake_scheduler_resolve_and_fire():
     clock = Clock("2026-11-20T07:20:00")  # naive house time, as in NOW_OVERRIDE
     ws = WakeScheduler(clock, wake)
     assert ws.resolve("07:25") == datetime(2026, 11, 20, 7, 25)
-    assert ws.resolve("07:00") == datetime(2026, 11, 21, 7, 0)  # already passed -> tomorrow
+    assert ws.resolve("07:00") == datetime(2026, 11, 21, 7, 0)  # 20 min ago -> tomorrow
+    just_now = ws.resolve("07:15")  # 5 min ago: the agent was late -> now, not tomorrow
+    assert just_now is not None and just_now.date() == datetime(2026, 11, 20).date()
+    assert abs((just_now - clock.now()).total_seconds()) < 2
     assert ws.resolve("bogus") is None
     assert ws.schedule("2026-11-25T07:00:00", "too far") is None
 

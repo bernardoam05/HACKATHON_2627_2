@@ -188,6 +188,7 @@ class Clock:
 
 
 MAX_WAKE_AHEAD = timedelta(hours=24)
+WAKE_GRACE = timedelta(minutes=10)
 
 
 class WakeScheduler:
@@ -200,13 +201,17 @@ class WakeScheduler:
         self._timers: dict[str, tuple[datetime, str, asyncio.Task[None]]] = {}
 
     def resolve(self, at: str) -> datetime | None:
-        """"HH:MM" -> next occurrence; ISO -> as is. Same tz-awareness as the clock."""
+        """"HH:MM" -> next occurrence; ISO -> as is. Same tz-awareness as the clock.
+        A "HH:MM" that passed less than WAKE_GRACE ago means "now" (the agent was a bit late,
+        e.g. started at 07:24 and asked for 07:20), not tomorrow."""
         now = self._clock.now()
         try:
             if len(at) <= 5 and ":" in at:
                 h, m = (int(x) for x in at.split(":"))
                 when = now.replace(hour=h, minute=m, second=0, microsecond=0)
-                return when if when > now else when + timedelta(days=1)
+                if when > now:
+                    return when
+                return now if now - when <= WAKE_GRACE else when + timedelta(days=1)
             when = datetime.fromisoformat(at.replace("Z", "+00:00"))
         except ValueError:
             return None
