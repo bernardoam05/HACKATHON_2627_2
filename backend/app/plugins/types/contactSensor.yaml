@@ -1,0 +1,11 @@
+type: contactSensor
+displayName: Sensor de contacto
+purpose: security
+status: builtin
+capabilities:
+  - type: contact
+    description: Aberto/fechado
+    writable: false
+    autonomy: auto
+starterAutomations:
+  - Porta de entrada: detetar saída de casa

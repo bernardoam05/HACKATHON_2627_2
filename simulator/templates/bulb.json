@@ -1,0 +1,21 @@
+{
+  "type": "bulb",
+  "name": "Lamp",
+  "categories": [
+    "comfort"
+  ],
+  "capabilities": [
+    {
+      "type": "power",
+      "name": "power",
+      "value": false
+    },
+    {
+      "type": "brightness",
+      "name": "brightness",
+      "value": 0,
+      "min": 0,
+      "max": 100
+    }
+  ]
+}

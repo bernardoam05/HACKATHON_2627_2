@@ -1,0 +1,14 @@
+{
+  "type": "contactSensor",
+  "name": "Contact sensor",
+  "categories": [
+    "security"
+  ],
+  "capabilities": [
+    {
+      "type": "contact",
+      "name": "contact",
+      "value": false
+    }
+  ]
+}

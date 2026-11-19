@@ -1,0 +1,35 @@
+{
+  "name": "Contact sensor",
+  "id": "0650f9fe-da93-4825-bc9d-76f61d7deeaa",
+  "type": "contactSensor",
+  "capabilities": [
+    {
+      "name": "",
+      "type": "tamperState",
+      "availableValues": ["normal", "alarm"],
+      "value": "normal"
+    },
+    {
+      "name": "",
+      "type": "signalStrength",
+      "availableValues": ["low", "medium", "high"],
+      "value": "high"
+    },
+    {
+      "name": "",
+      "type": "sensorState",
+      "availableValues": ["normal", "alarm"],
+      "value": "alarm"
+    },
+    {
+      "name": "",
+      "type": "batteryStatus",
+      "availableValues": ["low", "medium", "high"],
+      "value": "high"
+    }
+  ],
+  "categories": ["security"],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793978811145,
+  "pairedTime": 1793800801405
+}

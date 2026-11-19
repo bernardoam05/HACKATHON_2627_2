@@ -1,0 +1,67 @@
+{
+  "name": "Plug",
+  "id": "6d82e2d5-2b8a-415b-b2ae-699672856d19",
+  "type": "plug",
+  "capabilities": [
+    { "name": "", "type": "instantPower", "value": 0, "min": 0, "max": 50000 },
+    {
+      "name": "",
+      "type": "instantVoltage",
+      "value": 237,
+      "min": 0,
+      "max": 50000
+    },
+    {
+      "name": "",
+      "type": "multiPower",
+      "value": [
+        {
+          "id": "1",
+          "name": "switch_1",
+          "order": 1,
+          "partnerType": "switch_1",
+          "type": "multiplugSwitch",
+          "value": "on"
+        }
+      ]
+    },
+    {
+      "name": "",
+      "type": "power",
+      "availableValues": ["on", "off"],
+      "value": "on"
+    },
+    {
+      "name": "",
+      "type": "additionalEnergyConsumption",
+      "value": 0,
+      "min": 0,
+      "max": 50000
+    },
+    {
+      "name": "",
+      "type": "instantCurrent",
+      "value": 0,
+      "min": 0,
+      "max": 30000
+    },
+    {
+      "name": "",
+      "type": "todayConsumption",
+      "value": 0,
+      "min": 0,
+      "max": 50000
+    },
+    {
+      "name": "",
+      "type": "yesterdayConsumption",
+      "value": 0,
+      "min": 0,
+      "max": 50000
+    }
+  ],
+  "categories": ["energy"],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793805383191,
+  "pairedTime": 1793793768739
+}

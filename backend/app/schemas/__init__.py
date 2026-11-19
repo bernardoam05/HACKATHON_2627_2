@@ -1,0 +1,56 @@
+"""Shared contract: re-exports every model."""
+from .agent import (
+    AgentRunInput,
+    ChatRequest,
+    ChatResponse,
+    Decision,
+    DecisionTrigger,
+    DoorEvent,
+    Insight,
+    InsightStatus,
+    InsightUpdate,
+    PluginProposal,
+    PresenceFacts,
+    ProposedAction,
+    Reflex,
+    ReflexProposal,
+    ReflexStatus,
+    ReflexTrigger,
+    ReflexUpdate,
+    RoomMotion,
+    TimeWindow,
+)
+from .device import (
+    Capability,
+    CapabilityUpdate,
+    Device,
+    DeviceAssignment,
+    DeviceSource,
+    Room,
+    RoomCreate,
+    SimDeviceCreate,
+)
+from .events import ActionRecord, ActionStatus, StateChange, StateSnapshot, UserFeedback
+from .plugin import (
+    CATEGORY_DEFAULT_AUTONOMY,
+    AutonomyLevel,
+    CapabilitySpec,
+    ConfigMode,
+    DevicePlugin,
+    DevicePurpose,
+    PluginStatus,
+)
+from .ws import (
+    ActionUpdatedMsg,
+    AgentStatusMsg,
+    DecisionMsg,
+    DeviceAddedMsg,
+    DeviceRemovedMsg,
+    InsightUpdatedMsg,
+    PluginNeededMsg,
+    ReflexExecutedMsg,
+    ReflexProposedMsg,
+    ReflexUpdatedMsg,
+    StateChangedMsg,
+    WsMessage,
+)

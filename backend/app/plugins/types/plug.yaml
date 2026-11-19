@@ -1,0 +1,20 @@
+type: plug
+displayName: Ficha inteligente
+purpose: energy
+status: builtin
+capabilities:
+  - type: power
+    description: Liga/desliga
+    writable: true
+    autonomy: auto_notify
+  - type: instantPower
+    description: Consumo instantâneo (W)
+    writable: false
+    autonomy: auto
+  - type: energyToday
+    description: Energia hoje
+    writable: false
+    autonomy: auto
+starterAutomations:
+  - Ligar a ficha antes da rotina habitual
+  - Desligar ficha quando a casa fica vazia

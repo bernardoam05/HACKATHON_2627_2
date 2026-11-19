@@ -1,0 +1,24 @@
+{
+  "name": "Light",
+  "id": "dc9814bc-81bb-4546-b22d-80705b65fd22",
+  "type": "bulb",
+  "capabilities": [
+    {
+      "name": "",
+      "type": "workMode",
+      "availableValues": ["colour", "music", "white", "scene"],
+      "value": "white"
+    },
+    { "name": "", "type": "brightness", "value": 100, "min": 1, "max": 100 },
+    { "name": "", "type": "temperature", "value": 25, "min": 0, "max": 100 },
+    {
+      "name": "",
+      "type": "power",
+      "availableValues": ["on", "off"],
+      "value": "on"
+    }
+  ],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793801179513,
+  "pairedTime": 1793793976073
+}

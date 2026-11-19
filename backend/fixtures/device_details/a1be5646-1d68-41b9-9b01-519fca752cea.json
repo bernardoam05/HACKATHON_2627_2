@@ -1,0 +1,65 @@
+{
+  "name": "Camera",
+  "id": "a1be5646-1d68-41b9-9b01-519fca752cea",
+  "type": "camera",
+  "capabilities": [
+    { "name": "", "type": "motionDetected", "value": "" },
+    {
+      "name": "",
+      "type": "startCloudRecording",
+      "value": 10,
+      "min": 0,
+      "max": 300
+    },
+    {
+      "name": "",
+      "type": "soundSensitivity",
+      "availableValues": ["low", "medium", "high"],
+      "value": "low"
+    },
+    { "name": "", "type": "sdRecording", "value": true },
+    { "name": "", "type": "volume", "value": 8, "min": 0, "max": 10 },
+    { "name": "", "type": "sirenSwitch", "value": false },
+    {
+      "name": "",
+      "type": "sdAvailable",
+      "availableValues": ["1", "2", "3", "4", "5"],
+      "value": 5
+    },
+    { "name": "", "type": "stopCloudRecording", "value": false },
+    { "name": "", "type": "sdFormatState", "value": -20000 },
+    {
+      "name": "",
+      "type": "motionSensitivity",
+      "availableValues": ["0", "1", "2"],
+      "value": "2"
+    },
+    { "name": "", "type": "sdFormat", "value": false },
+    {
+      "name": "",
+      "type": "sdRecordMode",
+      "availableValues": ["1", "2"],
+      "value": "2"
+    },
+    { "name": "", "type": "streamingSwitch", "value": false },
+    { "name": "", "type": "lightIndicator", "value": true },
+    { "name": "", "type": "basicFlip", "value": false },
+    { "name": "", "type": "motionAlarmSwitch", "value": true },
+    { "name": "", "type": "soundDetected", "value": "" },
+    {
+      "name": "",
+      "type": "nightVisionMode",
+      "availableValues": ["0", "1", "2"],
+      "value": "0"
+    },
+    { "name": "", "type": "soundAlarmSwitch", "value": false },
+    { "name": "", "type": "sdStorage", "value": "" },
+    { "name": "", "type": "basicOsd", "value": true },
+    { "name": "", "type": "motionHumanoidFilter", "value": false },
+    { "name": "", "type": "manualCloudRecordingTriggered", "value": "" }
+  ],
+  "categories": ["security"],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1794245408980,
+  "pairedTime": 1793794221915
+}

@@ -1,0 +1,14 @@
+type: camera
+displayName: Câmara
+purpose: security
+status: builtin
+capabilities:
+  - type: motionDetected
+    description: Movimento detetado
+    writable: false
+    autonomy: auto
+  - type: recording
+    description: Gravação
+    writable: true
+    autonomy: suggest
+starterAutomations: []

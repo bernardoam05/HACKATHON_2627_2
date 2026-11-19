@@ -1,0 +1,19 @@
+type: bulb
+displayName: Lâmpada
+purpose: comfort
+status: builtin
+capabilities:
+  - type: power
+    description: Liga/desliga
+    writable: true
+    autonomy: auto
+  - type: brightness
+    description: Intensidade 0-100
+    writable: true
+    autonomy: auto
+  - type: color_rgb
+    description: Cor
+    writable: true
+    autonomy: auto
+starterAutomations:
+  - Baixar a luz quando a TV liga ao serão

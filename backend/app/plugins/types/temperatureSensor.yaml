@@ -1,0 +1,10 @@
+type: temperatureSensor
+displayName: Sensor de temperatura
+purpose: environment
+status: builtin
+capabilities:
+  - type: temperature
+    description: Temperatura (ºC)
+    writable: false
+    autonomy: auto
+starterAutomations: []

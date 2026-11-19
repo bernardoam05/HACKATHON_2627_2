@@ -1,0 +1,15 @@
+type: gateway
+displayName: Hub de segurança
+purpose: security
+status: builtin
+capabilities:
+  - type: securityStatus
+    description: Estado do alarme
+    writable: true
+    autonomy: suggest
+  - type: sirenSwitch
+    description: Sirene
+    writable: true
+    autonomy: suggest
+starterAutomations:
+  - Propor armar o alarme quando a casa fica vazia

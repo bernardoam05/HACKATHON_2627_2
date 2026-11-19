@@ -1,0 +1,25 @@
+{
+  "name": "Temperature sensor",
+  "id": "d7c156aa-397b-4688-95ea-30863b20d7e0",
+  "type": "temperatureSensor",
+  "capabilities": [
+    {
+      "name": "",
+      "type": "humidityValue",
+      "value": 47.9,
+      "min": 0,
+      "max": 100
+    },
+    { "name": "", "type": "batteryLevel", "value": 100, "min": 0, "max": 100 },
+    {
+      "name": "",
+      "type": "temperatureValue",
+      "value": 20.8,
+      "min": -50,
+      "max": 60
+    }
+  ],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793978811145,
+  "pairedTime": 1793978608860
+}
