@@ -52,7 +52,7 @@ from .belief import BeliefStore
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
-from .prompts import build_prompt, instructions
+from .prompts import build_prompt, instructions, room_of
 from .reflexes import ReflexDraft, ReflexEngine, ReflexUpdateDraft
 from .tools import AgentDeps, register_tools
 
@@ -421,8 +421,12 @@ class HomeAgent:
         if mode == "full":
             types = {d.type for d in devices if d.enabled}
         else:
+            # Changed devices plus the devices in their rooms (the agent may act on those, e.g.
+            # motion in a room -> its light), so their plugins' expectedBehaviours are visible.
             changed = {c.deviceId for c in changes}
-            types = {d.type for d in devices if d.id in changed}
+            rooms = {room_of(d) for d in devices if d.id in changed and room_of(d)}
+            types = {d.type for d in devices
+                     if d.enabled and (d.id in changed or room_of(d) in rooms)}
         plugins: list[DevicePlugin] = [
             p for t in sorted(types) if (p := await self._plugins.get(t)) is not None
         ]

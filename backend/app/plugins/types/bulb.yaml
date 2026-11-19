@@ -21,3 +21,4 @@ capabilities:
     autonomy: auto
 starterAutomations:
   - Baixar a luz quando a TV liga ao serão
+  - "A luz acompanha a pessoa: quando aparece movimento numa divisão, acender a luz dessa divisão; quando a divisão de onde a pessoa saiu fica sem movimento, apagar a luz dela"
