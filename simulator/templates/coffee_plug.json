@@ -1,19 +1,10 @@
 {
   "type": "plug",
-  "name": "Coffee machine plug",
-  "categories": [
-    "energy"
-  ],
+  "name": "Máquina de café",
+  "categories": ["energy"],
   "capabilities": [
-    {
-      "type": "power",
-      "name": "power",
-      "value": false
-    },
-    {
-      "type": "instantPower",
-      "name": "instantPower",
-      "value": 2
-    }
+    { "name": "", "type": "instantPower", "value": 0, "min": 0, "max": 50000 },
+    { "name": "", "type": "instantVoltage", "value": 237, "min": 0, "max": 50000 },
+    { "name": "", "type": "power", "availableValues": ["on", "off"], "value": "off" }
   ]
 }

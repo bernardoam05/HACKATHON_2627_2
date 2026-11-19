@@ -1,14 +1,11 @@
 {
   "type": "contactSensor",
-  "name": "Contact sensor",
-  "categories": [
-    "security"
-  ],
+  "name": "Sensor de contacto",
+  "categories": ["security"],
   "capabilities": [
-    {
-      "type": "contact",
-      "name": "contact",
-      "value": false
-    }
+    { "name": "", "type": "tamperState", "availableValues": ["normal", "alarm"], "value": "normal" },
+    { "name": "", "type": "signalStrength", "availableValues": ["low", "medium", "high"], "value": "high" },
+    { "name": "", "type": "sensorState", "availableValues": ["normal", "alarm"], "value": "normal" },
+    { "name": "", "type": "batteryStatus", "availableValues": ["low", "medium", "high"], "value": "high" }
   ]
 }

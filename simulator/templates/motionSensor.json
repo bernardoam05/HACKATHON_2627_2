@@ -1,17 +1,9 @@
 {
   "type": "motionSensor",
-  "name": "Motion sensor",
+  "name": "Sensor de movimento",
   "categories": [],
   "capabilities": [
-    {
-      "type": "motionDetected",
-      "name": "motionDetected",
-      "value": false
-    },
-    {
-      "type": "lastMotionAt",
-      "name": "lastMotionAt",
-      "value": null
-    }
+    { "name": "", "type": "motionDetected", "value": false },
+    { "name": "", "type": "lastMotionAt", "value": null }
   ]
 }
