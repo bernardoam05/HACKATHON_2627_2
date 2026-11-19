@@ -10,6 +10,7 @@ import {
 } from "@assistant-ui/react";
 import { useId, useMemo, useState } from "react";
 import type { Decision } from "../../api/types";
+import { ChevronIcon, MicIcon, SendIcon, StopIcon } from "../../ui";
 import { DecisionCard } from "../decisions/DecisionCard";
 import { chatAdapter, decisionOf } from "./chatAdapter";
 import { createDictation, dictationSupported } from "./useVoice";
@@ -44,7 +45,7 @@ function Thread({ onClear }: { onClear: () => void }) {
           <button type="button" onClick={onClear}
             className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted hover:bg-surface-2 hover:text-ink
                        focus-visible:outline-2 focus-visible:outline-accent">
-            🗑 Limpar conversa
+            Limpar conversa
           </button>
         </div>
       </ThreadPrimitive.If>
@@ -126,10 +127,7 @@ function DecisionDetails({ decision }: { decision: Decision }) {
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
         className="flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-sm text-muted hover:text-ink
                    focus-visible:outline-2 focus-visible:outline-accent">
-        <svg viewBox="0 0 20 20" aria-hidden="true"
-             className={`size-4 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}>
-          <path d="M7 5l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ChevronIcon open={open} />
         Detalhes{n > 0 && ` · ${n} ${n === 1 ? "ação" : "ações"}`}
       </button>
       <div id={id} hidden={!open} className="mt-1.5">
@@ -155,19 +153,21 @@ function Composer() {
       />
       {dictationSupported && (dictating ? (
         <ComposerPrimitive.StopDictation aria-label="Parar de ouvir"
-          className="size-10 shrink-0 cursor-pointer rounded-lg bg-bad-soft text-bad motion-safe:animate-pulse">
-          ⏹
+          className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-lg bg-bad-soft text-bad
+                     motion-safe:animate-pulse">
+          <StopIcon className="size-4" />
         </ComposerPrimitive.StopDictation>
       ) : (
         <ComposerPrimitive.Dictate aria-label="Falar"
-          className="size-10 shrink-0 cursor-pointer rounded-lg border border-line bg-surface hover:bg-surface-2">
-          🎤
+          className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-lg border border-line bg-surface
+                     text-muted hover:bg-surface-2 hover:text-ink">
+          <MicIcon />
         </ComposerPrimitive.Dictate>
       ))}
       <ComposerPrimitive.Send aria-label="Enviar"
-        className="h-10 w-10 shrink-0 cursor-pointer rounded-lg bg-accent text-surface hover:brightness-110
-                   disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-4">
-        <span className="sm:hidden" aria-hidden="true">➤</span>
+        className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg bg-accent text-surface
+                   hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:flex sm:w-auto sm:px-4">
+        <SendIcon className="size-5 sm:hidden" />
         <span className="hidden sm:inline">Enviar</span>
       </ComposerPrimitive.Send>
     </ComposerPrimitive.Root>

@@ -1,4 +1,5 @@
 // Owner: Team B. Live from /ws: Undo for auto_notify, Confirm/Reject for suggest, reflex badge.
+// Each entry shows the essential line; details expand on demand so the feed stays light.
 import { useMemo, useState } from "react";
 import { api } from "../../api/client";
 import type { ActionRecord, ActionStatus, AutonomyLevel, Decision } from "../../api/types";
@@ -6,12 +7,14 @@ import { describeUpdate, useDeviceLabel } from "../../live/DevicesProvider";
 import { useLiveMessages } from "../../live/LiveProvider";
 import { formatClock, timeAgo, useNow } from "../../lib/time";
 import { errorMessage, useResource } from "../../lib/useResource";
-import { Badge, Button, Card, Empty, ErrorNote, Loading } from "../../ui";
+import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading } from "../../ui";
 import { DecisionCard } from "../decisions/DecisionCard";
 
 const LIMIT = 50;
 
-const STATUS: Record<ActionStatus, { label: string; tone: "good" | "warn" | "neutral" | "bad" }> = {
+type Tone = "good" | "warn" | "neutral" | "bad";
+
+const STATUS: Record<ActionStatus, { label: string; tone: Tone }> = {
   executed: { label: "Feito", tone: "good" },
   pending_confirmation: { label: "À espera", tone: "warn" },
   rejected: { label: "Rejeitado", tone: "neutral" },
@@ -34,19 +37,19 @@ function upsert<T extends { id: string }>(list: T[] | undefined, item: T): T[] {
   return [item, ...rest].slice(0, LIMIT * 2);
 }
 
-const newestFirst = (a: { at: string }, b: { at: string }) => b.at.localeCompare(a.at);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export default function ActivityFeed() {
   const decisions = useResource(() => api.decisions(LIMIT));
   const actions = useResource(() => api.actions("", LIMIT));
-  const [reflexActionIds, setReflexActionIds] = useState<ReadonlySet<string>>(new Set());
+  const [reflexIds, setReflexIds] = useState<ReadonlySet<string>>(new Set());
 
   useLiveMessages((m) => {
     if (m.type === "decision") decisions.setData((ds) => upsert(ds, m.decision));
     else if (m.type === "action_updated") actions.setData((as) => upsert(as, m.action));
     else if (m.type === "reflex_executed") {
       actions.setData((as) => m.actions.reduce((acc, a) => upsert(acc, a), as ?? []));
-      setReflexActionIds((ids) => new Set([...ids, ...m.actions.map((a) => a.id)]));
+      setReflexIds((ids) => new Set([...ids, ...m.actions.map((a) => a.id)]));
     }
   });
 
@@ -60,12 +63,13 @@ export default function ActivityFeed() {
     const list: Item[] = [
       ...(decisions.data ?? []).map((d): Item =>
         ({ kind: "decision", at: d.createdAt, decision: d, actions: byDecision.get(d.id) ?? [] })),
-      ...all.filter((a) => !known.has(a.decisionId)).map((a): Item => ({ kind: "action", at: a.createdAt, action: a })),
+      ...all.filter((a) => !known.has(a.decisionId))
+        .map((a): Item => ({ kind: "action", at: a.createdAt, action: a })),
     ];
     return {
       pending: all.filter((a) => a.status === "pending_confirmation")
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      items: list.sort(newestFirst).slice(0, LIMIT),
+      items: list.sort((a, b) => b.at.localeCompare(a.at)).slice(0, LIMIT),
     };
   }, [actions.data, decisions.data]);
 
@@ -76,12 +80,11 @@ export default function ActivityFeed() {
   return (
     <div className="grid gap-4">
       {pending.length > 0 && (
-        <Card title={<>À tua espera <Badge tone="warn">{pending.length}</Badge></>}>
+        <Card title={<span className="flex items-center gap-2">À tua espera <Badge tone="warn">{pending.length}</Badge></span>}>
           <ul className="m-0 grid list-none gap-2 p-0">
             {pending.map((a) => (
               <li key={a.id}>
-                <ActionRow action={a} reason={reasonFor(a, decisions.data)} reflex={reflexActionIds.has(a.id)}
-                           onResolved={onResolved} />
+                <PendingAction action={a} reason={reasonFor(a, decisions.data)} onResolved={onResolved} />
               </li>
             ))}
           </ul>
@@ -93,14 +96,13 @@ export default function ActivityFeed() {
         {loading ? <Loading /> : items.length === 0 ? (
           <Empty>Ainda não aconteceu nada. Quando a casa reagir a alguma coisa, aparece aqui.</Empty>
         ) : (
-          <ol className="m-0 grid list-none gap-3 p-0">
+          <ol className="m-0 grid list-none gap-2 p-0">
             {items.map((it) => (
               <li key={it.kind === "decision" ? `d-${it.decision.id}` : `a-${it.action.id}`}>
                 {it.kind === "decision"
-                  ? <DecisionEntry decision={it.decision} actions={it.actions} reflexIds={reflexActionIds}
+                  ? <DecisionEntry decision={it.decision} actions={it.actions} reflexIds={reflexIds}
                                    onResolved={onResolved} />
-                  : <ActionRow action={it.action} reflex={reflexActionIds.has(it.action.id)}
-                               onResolved={onResolved} showTime />}
+                  : <ActionEntry action={it.action} reflex={reflexIds.has(it.action.id)} onResolved={onResolved} />}
               </li>
             ))}
           </ol>
@@ -120,42 +122,128 @@ function When({ iso }: { iso: string }) {
   return <time dateTime={iso} title={formatClock(iso)} className="text-xs text-muted">{timeAgo(iso, now)}</time>;
 }
 
+/** One badge per distinct action status, e.g. "Feito" or "À espera". */
+function StatusBadges({ actions }: { actions: ActionRecord[] }) {
+  const statuses = [...new Set(actions.map((a) => a.status))];
+  return <>{statuses.map((s) => <Badge key={s} tone={STATUS[s].tone}>{STATUS[s].label}</Badge>)}</>;
+}
+
 function DecisionEntry({ decision, actions, reflexIds, onResolved }: {
   decision: Decision;
   actions: ActionRecord[];
   reflexIds: ReadonlySet<string>;
   onResolved: (a: ActionRecord) => void;
 }) {
+  const n = decision.actions.length;
   return (
-    <div className="grid gap-2">
-      <When iso={decision.createdAt} />
-      <DecisionCard decision={decision} />
+    <Expandable summary={
+      <div className="grid gap-1">
+        <p className="m-0">{decision.explanation}</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <When iso={decision.createdAt} />
+          {n > 0 && <span className="text-xs text-muted">· {plural(n, "ação", "ações")}</span>}
+          {actions.some((a) => reflexIds.has(a.id)) && <Badge tone="accent">Reflexo</Badge>}
+          <StatusBadges actions={actions} />
+        </div>
+      </div>
+    }>
+      <DecisionCard decision={decision} showExplanation={false} />
       {actions.length > 0 && (
-        <ul className="m-0 grid list-none gap-1.5 p-0 pl-3 sm:pl-4">
+        <ul className="m-0 grid list-none gap-1.5 p-0">
           {actions.map((a) => (
             <li key={a.id}>
-              <ActionRow action={a} reason={reasonFor(a, [decision])} reflex={reflexIds.has(a.id)}
-                         onResolved={onResolved} compact />
+              <ActionDetails action={a} reason={reasonFor(a, [decision])} reflex={reflexIds.has(a.id)}
+                             onResolved={onResolved} />
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </Expandable>
   );
 }
 
-function ActionRow({ action, reason, reflex, onResolved, compact = false, showTime = false }: {
+/** An action without a known decision (e.g. a reflex execution). */
+function ActionEntry({ action, reflex, onResolved }: {
+  action: ActionRecord;
+  reflex: boolean;
+  onResolved: (a: ActionRecord) => void;
+}) {
+  return (
+    <Expandable summary={
+      <div className="grid gap-1">
+        <ActionLine action={action} />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <When iso={action.createdAt} />
+          {reflex && <Badge tone="accent">Reflexo</Badge>}
+          <StatusBadges actions={[action]} />
+        </div>
+      </div>
+    }>
+      <p className="m-0 text-sm text-muted">{AUTONOMY[action.autonomy]}</p>
+      <ActionButtons action={action} onResolved={onResolved} />
+    </Expandable>
+  );
+}
+
+function ActionLine({ action }: { action: ActionRecord }) {
+  const label = useDeviceLabel();
+  return (
+    <p className="m-0">
+      <span className="font-medium">{label(action.deviceId)}</span>
+      <span className="text-muted"> · {describeUpdate(action.update)}</span>
+    </p>
+  );
+}
+
+/** Inside an expanded decision: what was done, why, status, and Undo when allowed. */
+function ActionDetails({ action, reason, reflex, onResolved }: {
   action: ActionRecord;
   reason?: string;
   reflex: boolean;
   onResolved: (a: ActionRecord) => void;
-  compact?: boolean;
-  showTime?: boolean;
 }) {
-  const label = useDeviceLabel();
+  const status = STATUS[action.status];
+  return (
+    <div className="grid gap-1.5 rounded-lg border border-line bg-surface px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ActionLine action={action} />
+        <div className="flex items-center gap-1.5">
+          {reflex && <Badge tone="accent">Reflexo</Badge>}
+          <Badge tone={status.tone}>{status.label}</Badge>
+        </div>
+      </div>
+      <p className="m-0 text-sm text-muted">
+        {reason ? `${reason} · ` : ""}{AUTONOMY[action.autonomy]}
+      </p>
+      <ActionButtons action={action} onResolved={onResolved} />
+    </div>
+  );
+}
+
+/** A suggestion waiting for the user: always open, with Confirmar / Rejeitar. */
+function PendingAction({ action, reason, onResolved }: {
+  action: ActionRecord;
+  reason?: string;
+  onResolved: (a: ActionRecord) => void;
+}) {
+  return (
+    <div className="grid gap-2 rounded-lg border border-line bg-canvas p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ActionLine action={action} />
+        <When iso={action.createdAt} />
+      </div>
+      {reason && <p className="m-0 text-sm text-muted">{reason}</p>}
+      <ActionButtons action={action} onResolved={onResolved} />
+    </div>
+  );
+}
+
+function ActionButtons({ action, onResolved }: { action: ActionRecord; onResolved: (a: ActionRecord) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const status = STATUS[action.status];
+  const pending = action.status === "pending_confirmation";
+  const canUndo = action.status === "executed" && action.autonomy === "auto_notify";
+  if (!pending && !canUndo && !error) return null;
 
   const run = async (call: (id: string) => Promise<ActionRecord>) => {
     setBusy(true);
@@ -169,39 +257,15 @@ function ActionRow({ action, reason, reflex, onResolved, compact = false, showTi
     }
   };
 
-  // Inside a decision (compact) pending actions only show their badge: the buttons live in "À tua espera".
-  const pending = action.status === "pending_confirmation" && !compact;
-  const canUndo = action.status === "executed" && action.autonomy === "auto_notify";
-
   return (
-    <div className={`grid gap-1.5 rounded-lg border border-line ${compact ? "bg-surface px-3 py-2" : "bg-canvas p-3"}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {reflex && <Badge tone="accent">⚡ Reflexo</Badge>}
-          <span className="font-medium">{label(action.deviceId)}</span>
-          <span className="text-muted">· {describeUpdate(action.update)}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Badge tone={status.tone}>{status.label}</Badge>
-          {showTime && <When iso={action.createdAt} />}
-        </div>
+    <div className="grid gap-2">
+      <div className="flex flex-wrap gap-2">
+        {pending && <>
+          <Button variant="primary" disabled={busy} onClick={() => run(api.confirmAction)}>Confirmar</Button>
+          <Button disabled={busy} onClick={() => run(api.rejectAction)}>Rejeitar</Button>
+        </>}
+        {canUndo && <Button disabled={busy} onClick={() => run(api.undoAction)}>Desfazer</Button>}
       </div>
-      {(reason || !compact) && (
-        <p className="m-0 text-sm text-muted">
-          {reason}
-          {reason && !compact && " · "}
-          {!compact && AUTONOMY[action.autonomy]}
-        </p>
-      )}
-      {(pending || canUndo) && (
-        <div className="flex flex-wrap gap-2">
-          {pending && <>
-            <Button variant="primary" disabled={busy} onClick={() => run(api.confirmAction)}>Confirmar</Button>
-            <Button disabled={busy} onClick={() => run(api.rejectAction)}>Rejeitar</Button>
-          </>}
-          {canUndo && <Button disabled={busy} onClick={() => run(api.undoAction)}>↩ Desfazer</Button>}
-        </div>
-      )}
       {error && <ErrorNote message={error} />}
     </div>
   );

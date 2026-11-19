@@ -19,7 +19,7 @@ export function DecisionCard({ decision, showTrigger = true, showExplanation = t
       {showExplanation && <p className="m-0">{explanation}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
         {showTrigger && <Badge>{TRIGGER_LABEL[decision.trigger]}</Badge>}
-        {inferredRoom && <Badge tone="accent">📍 {inferredRoom}</Badge>}
+        {inferredRoom && <Badge tone="accent">{inferredRoom}</Badge>}
         {inferredActivity && <Badge tone="accent">{inferredActivity}</Badge>}
         <span className="text-xs text-muted">Confiança {Math.round(confidence * 100)}%</span>
       </div>

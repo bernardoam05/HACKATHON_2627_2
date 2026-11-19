@@ -1,5 +1,35 @@
 // Owner: Team B. Small shared building blocks, styled with Tailwind (tokens in src/styles.css).
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { ChevronIcon } from "./icons";
+
+export * from "./icons";
+
+/**
+ * A box that shows `summary` and expands to show `children` (the details), so lists stay light.
+ * The whole summary row is the toggle.
+ */
+export function Expandable({ summary, children, defaultOpen = false, className = "" }: {
+  summary: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  return (
+    <div className={`rounded-lg border border-line bg-canvas ${className}`}>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
+        className="flex w-full cursor-pointer items-start gap-2 rounded-lg p-3 text-left hover:bg-surface-2/60
+                   focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+        <ChevronIcon open={open} className="mt-0.5 size-4 shrink-0 text-muted" />
+        <div className="min-w-0 flex-1">{summary}</div>
+      </button>
+      <div id={id} hidden={!open} className="grid gap-2 border-t border-line p-3">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 
