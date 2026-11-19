@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import aiosqlite
 from pydantic import BaseModel
@@ -384,4 +384,21 @@ class Repository:
             "INSERT OR REPLACE INTO cooldown_defaults(device_id, minutes) VALUES (?, ?)",
             (device_id, minutes),
         )
+        await self._db.commit()
+
+    # --- key/value (e.g. OAuth tokens for the Altice MCP) -----------------------------------
+
+    async def kv_get(self, key: str) -> Any:
+        async with self._db.execute("SELECT data FROM kv WHERE key = ?", (key,)) as cur:
+            r = await cur.fetchone()
+        return json.loads(r["data"]) if r else None
+
+    async def kv_set(self, key: str, value: Any) -> None:
+        await self._db.execute(
+            "INSERT OR REPLACE INTO kv(key, data) VALUES (?, ?)", (key, json.dumps(value))
+        )
+        await self._db.commit()
+
+    async def kv_delete(self, key: str) -> None:
+        await self._db.execute("DELETE FROM kv WHERE key = ?", (key,))
         await self._db.commit()

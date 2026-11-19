@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any
 
+import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
@@ -28,6 +29,25 @@ class McpUnavailable(RuntimeError):
     """Could not reach the server (connect failure, timeout, dropped session)."""
 
 
+class McpAuthRequired(McpUnavailable):
+    """No usable OAuth token: someone has to log in (`python -m app.mcp_clients.auth login`)."""
+
+
+AUTH_RETRY_SECONDS = 60  # while login is required, do not hit the server on every poll
+
+
+def _leaves(exc: BaseException) -> list[BaseException]:
+    if isinstance(exc, BaseExceptionGroup):
+        return [leaf for sub in exc.exceptions for leaf in _leaves(sub)]
+    return [exc]
+
+
+def _root_cause(exc: BaseException) -> BaseException:
+    """anyio task groups wrap errors in ExceptionGroups: surface the meaningful one (auth first)."""
+    leaves = _leaves(exc)
+    return next((e for e in leaves if isinstance(e, McpAuthRequired)), leaves[0] if leaves else exc)
+
+
 class McpClient:
     """Wraps an MCP session; methods: list_devices(), get_device(id), update_capabilities(id, CapabilityUpdate), rooms().
 
@@ -44,11 +64,14 @@ class McpClient:
         target: Any,
         *,
         headers: dict[str, str] | None = None,
+        auth: httpx2.Auth | None = None,
         timeout_seconds: float = 10.0,
         connect_timeout_seconds: float = 10.0,
     ) -> None:
         self._target = target
         self._headers = headers or {}
+        self._auth = auth
+        self._auth_blocked_until = 0.0  # monotonic time; set after McpAuthRequired
         self._timeout = timeout_seconds
         self._connect_timeout = connect_timeout_seconds
         self._client: Client | None = None
@@ -63,7 +86,7 @@ class McpClient:
             async with contextlib.AsyncExitStack() as stack:
                 if isinstance(self._target, str):
                     http = await stack.enter_async_context(
-                        create_mcp_http_client(headers=self._headers or None)
+                        create_mcp_http_client(headers=self._headers or None, auth=self._auth)
                     )
                     transport = streamable_http_client(self._target, http_client=http)
                     client = Client(transport, read_timeout_seconds=self._timeout)
@@ -73,25 +96,38 @@ class McpClient:
                 ready.set_result(None)
                 await self._stop.wait()
         except BaseException as e:  # noqa: BLE001 - surfaced to the waiting caller
+            root = _root_cause(e)
             if not ready.done():
-                ready.set_exception(McpUnavailable(f"{self._target_label()}: {e!r}"))
+                if isinstance(root, McpAuthRequired):
+                    ready.set_exception(McpAuthRequired(str(root)))
+                else:
+                    ready.set_exception(McpUnavailable(f"{self._target_label()}: {root!r}"))
             if isinstance(e, asyncio.CancelledError):
                 raise
-            log.warning("%s session ended: %r", self._target_label(), e)
+            if not isinstance(root, McpAuthRequired):
+                log.warning("%s session ended: %r", self._target_label(), root)
         finally:
             self._client = None
 
     async def _ensure(self) -> Client:
         if self._client is not None and self._runner is not None and not self._runner.done():
             return self._client
+        loop = asyncio.get_running_loop()
+        if loop.time() < self._auth_blocked_until:
+            raise McpAuthRequired(f"{self._target_label()}: login required")
         self._stop = asyncio.Event()
-        ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        ready: asyncio.Future[None] = loop.create_future()
         self._runner = asyncio.create_task(self._run_session(ready))
         try:
             await asyncio.wait_for(asyncio.shield(ready), self._connect_timeout)
         except TimeoutError as e:
             await self._reset()
             raise McpUnavailable(f"{self._target_label()}: connect timeout") from e
+        except McpAuthRequired:
+            self._auth_blocked_until = loop.time() + AUTH_RETRY_SECONDS
+            log.warning("%s: OAuth login required: run `python -m app.mcp_clients.auth login` "
+                        "in backend/ (retrying in %ss)", self._target_label(), AUTH_RETRY_SECONDS)
+            raise
         assert self._client is not None
         return self._client
 

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS device_cooldowns (
     device_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cooldown_defaults (
     device_id TEXT PRIMARY KEY, minutes REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY, data TEXT NOT NULL);
 """
 
 
