@@ -142,6 +142,9 @@ class Repository:
         )
         await self._db.commit()
 
+    async def get_decision(self, decision_id: str) -> Decision | None:
+        return await self._one(Decision, "SELECT data FROM decisions WHERE id = ?", (decision_id,))
+
     async def list_decisions(self, limit: int) -> list[Decision]:
         return await self._rows(
             Decision, "SELECT data FROM decisions ORDER BY ts DESC LIMIT ?", (limit,)

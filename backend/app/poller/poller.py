@@ -33,9 +33,10 @@ log = logging.getLogger(__name__)
 Broadcast = Callable[[BaseModel], Awaitable[None]]
 
 
-class ReflexHook(Protocol):
+class ChangeHook(Protocol):
     async def on_changes(self, changes: list[StateChange]) -> list[StateChange]:
-        """Run matching active reflexes; return synthetic changes to append (D16)."""
+        """React to a stored batch (override detection, reflexes, door timer); return synthetic
+        changes to append, e.g. `reflex_executed` (D16)."""
         ...
 
 
@@ -54,7 +55,7 @@ class Poller:
         scheduler: LatestWinsScheduler,
         broadcast: Broadcast,
         intervals: dict[DeviceSource, float],
-        reflexes: ReflexHook | None = None,
+        hooks: list[ChangeHook] | None = None,
         plugins: PluginLookup | None = None,
     ) -> None:
         self._registry = registry
@@ -62,7 +63,7 @@ class Poller:
         self._scheduler = scheduler
         self._broadcast = broadcast
         self._intervals = intervals
-        self._reflexes = reflexes
+        self._hooks = list(hooks or [])
         self._plugins = plugins
         self._prev: dict[DeviceSource, StateSnapshot] = {}
         self._lock = asyncio.Lock()  # one batch processed at a time across sources
@@ -97,11 +98,11 @@ class Poller:
             await self._repo.add_changes(changes)
             await self._repo.save_snapshot(self.current_snapshot())
 
-            if self._reflexes is not None:
+            for hook in self._hooks:  # in order; a failing hook never stops the poller
                 try:
-                    extra = await self._reflexes.on_changes(changes)
+                    extra = await hook.on_changes(changes)
                 except Exception:
-                    log.exception("reflex engine failed")
+                    log.exception("poller hook %s failed", type(hook).__name__)
                     extra = []
                 if extra:
                     await self._repo.add_changes(extra)

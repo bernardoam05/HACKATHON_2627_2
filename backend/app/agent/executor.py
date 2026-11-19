@@ -27,9 +27,15 @@ from app.schemas import (
 )
 from app.storage.repository import Repository
 
+from .feedback import FeedbackKind, FeedbackService
+
 log = logging.getLogger(__name__)
 
 Broadcast = Callable[[BaseModel], Awaitable[None]]
+
+
+SECURITY_STATUS = "securityStatus"
+SECURITY_STATUS_VALUES = ("disarm", "stay", "away")
 
 
 class InvalidAction(ValueError):
@@ -39,7 +45,8 @@ class InvalidAction(ValueError):
 class Executor:
     """execute(Decision): validate against plugin, resolve autonomy, auto/auto_notify execute, suggest -> pending_confirmation, honour override cooldown. Implements ActionService confirm/reject/undo.
 
-    TODO(Team A, phase 2): override cooldown (D9) and the alarm write path (patch_home_security_status).
+    The alarm is driven through the pseudo-capability `securityStatus` on the gateway
+    (`disarm` | `stay` | `away`), always `suggest`, written with `patch_home_security_status`.
     """
 
     def __init__(
@@ -48,33 +55,46 @@ class Executor:
         repo: Repository,
         plugins: PluginRegistry,
         broadcast: Broadcast,
+        feedback: FeedbackService | None = None,
     ) -> None:
         self._registry = registry
         self._repo = repo
         self._plugins = plugins
         self._broadcast = broadcast
+        self._feedback_svc = feedback
 
     # --- applying decisions -----------------------------------------------------------------
 
-    async def execute(self, decision: Decision) -> list[ActionRecord]:
+    async def execute(
+        self, decision: Decision, respect_cooldown: bool = True
+    ) -> list[ActionRecord]:
+        """`respect_cooldown=False` for explicit user commands from chat."""
         records: list[ActionRecord] = []
         for proposed in decision.actions:
-            record = await self.apply(decision.id, proposed)
+            record = await self.apply(decision.id, proposed, respect_cooldown=respect_cooldown)
             if record is not None:
                 records.append(record)
         return records
 
     async def apply(
-        self, decision_id: str, proposed: ProposedAction, never_suggest: bool = False
+        self,
+        decision_id: str,
+        proposed: ProposedAction,
+        never_suggest: bool = False,
+        respect_cooldown: bool = True,
     ) -> ActionRecord | None:
-        """Validate and apply one action. Returns None when it is a no-op (value already set)
-        or, with `never_suggest` (reflexes, D16), when it would need confirmation."""
+        """Validate and apply one action. Returns None when it is a no-op (value already set),
+        when the device is in an override cooldown (D9) or, with `never_suggest` (reflexes, D16),
+        when it would need confirmation."""
         try:
             device = await self._registry.get_device(proposed.deviceId)
         except KeyError:
             log.warning("decision %s: unknown device %s", decision_id, proposed.deviceId)
             return await self._record(decision_id, proposed.deviceId, proposed.update,
                                       AutonomyLevel.suggest, ActionStatus.failed)
+        if respect_cooldown and self._feedback_svc and self._feedback_svc.in_cooldown(device.id):
+            log.info("decision %s: %s is in override cooldown, skipped", decision_id, device.id)
+            return None
         try:
             update = await self.validate(device, proposed.update)
         except InvalidAction as e:
@@ -99,6 +119,10 @@ class Executor:
         """Never trust the LLM: capability must exist and be writable; values within range."""
         if not device.enabled:
             raise InvalidAction(f"{device.id} is disabled")
+        if update.type == SECURITY_STATUS:
+            if device.type != "gateway" or update.value not in SECURITY_STATUS_VALUES:
+                raise InvalidAction(f"securityStatus must be one of {SECURITY_STATUS_VALUES} on a gateway")
+            return update
         cap = device.capability(update.type)
         if cap is None:
             raise InvalidAction(f"{device.id} has no capability {update.type!r}")
@@ -182,7 +206,7 @@ class Executor:
     async def confirm(self, action_id: str) -> ActionRecord:
         """User confirmed a suggestion: write it now."""
         record = await self._get(action_id, ActionStatus.pending_confirmation)
-        await self._feedback(action_id, "confirm")
+        await self._feedback(record, "confirm")
         # Re-stamp createdAt so anti-loop measures from the real write time.
         record = record.model_copy(update={"status": ActionStatus.executed, "createdAt": _now(),
                                            "resolvedAt": _now()})
@@ -199,7 +223,7 @@ class Executor:
 
     async def reject(self, action_id: str) -> ActionRecord:
         record = await self._get(action_id, ActionStatus.pending_confirmation)
-        await self._feedback(action_id, "reject")
+        await self._feedback(record, "reject")
         record = record.model_copy(update={"status": ActionStatus.rejected, "resolvedAt": _now()})
         await self._save(record)
         return record
@@ -208,16 +232,19 @@ class Executor:
         """Restore the value the capability had before the action."""
         record = await self._get(action_id, ActionStatus.executed)
         known, prev = await self._repo.action_prev_value(action_id)
-        if not known:
+        if not known or prev is None:
             raise ValueError(f"action {action_id} has no previous value to restore")
         await self._registry.write(record.deviceId, CapabilityUpdate(type=record.update.type, value=prev))
-        await self._feedback(action_id, "undo")
+        await self._feedback(record, "undo")
         record = record.model_copy(update={"status": ActionStatus.undone, "resolvedAt": _now()})
         await self._save(record)
         return record
 
-    async def _feedback(self, action_id: str, kind: str) -> None:
-        await self._repo.add_feedback(UserFeedback(actionId=action_id, kind=kind, at=_now()))  # type: ignore[arg-type]
+    async def _feedback(self, action: ActionRecord, kind: FeedbackKind) -> None:
+        if self._feedback_svc is not None:
+            await self._feedback_svc.record(action, kind)
+        else:
+            await self._repo.add_feedback(UserFeedback(actionId=action.id, kind=kind, at=_now()))
 
 
 def _now() -> datetime:

@@ -21,8 +21,12 @@ from app.schemas import AgentStatusMsg, DeviceSource
 from app.storage.db import init_db
 from app.storage.repository import Repository
 
-from .agent import HomeAgent
+from .agent import Clock, HomeAgent
 from .executor import Executor
+from .feedback import FeedbackService
+from .insights import InsightEngine
+from .reflexes import ReflexEngine
+from .tools import PresenceWatcher
 
 
 async def build_services(
@@ -48,8 +52,20 @@ async def build_services(
     registry = DeviceRegistry(repo, rooms, clients)
     plugins = PluginRegistry(repo, devices=registry.list_devices)
     broadcast = broadcaster.broadcast
-    executor = Executor(registry, repo, plugins, broadcast)
-    agent = HomeAgent(settings, registry, repo, plugins, rooms, executor, broadcast, model=model)
+    clock = Clock(settings.NOW_OVERRIDE)
+    insights = InsightEngine(
+        repo, broadcast, settings.INSIGHT_MIN_CONFIDENCE, settings.REFLEX_MAX_UNDOS
+    )
+    feedback = FeedbackService(repo, insights)
+    executor = Executor(registry, repo, plugins, broadcast, feedback)
+    reflexes = ReflexEngine(
+        repo, registry, executor, plugins, broadcast, clock.now, settings.REFLEX_MIN_CONFIDENCE
+    )
+    agent = HomeAgent(
+        settings, registry, repo, plugins, rooms, executor, broadcast,
+        insights=insights, reflexes=reflexes, feedback=feedback, clock=clock, model=model,
+    )
+    presence = PresenceWatcher(registry, repo, settings.EMPTY_AFTER_MINUTES * 60, agent.wake)
 
     async def on_status(busy: bool, dirty: bool) -> None:
         await broadcast(AgentStatusMsg(busy=busy, dirty=dirty))
@@ -68,6 +84,7 @@ async def build_services(
             DeviceSource.sim: settings.SIM_POLL_SECONDS,
             DeviceSource.altice: settings.ALTICE_POLL_SECONDS,
         },
+        hooks=[feedback, reflexes, presence],  # order matters: overrides before reflexes
         plugins=plugins,
     )
 
@@ -82,6 +99,7 @@ async def build_services(
     )
 
     async def aclose() -> None:
+        presence.cancel()
         await scheduler.stop()
         for c in clients.values():
             await c.close()
@@ -90,5 +108,9 @@ async def build_services(
     services.poller = poller  # type: ignore[attr-defined]
     services.scheduler = scheduler  # type: ignore[attr-defined]
     services.repo = repo  # type: ignore[attr-defined]
+    services.reflexes = reflexes  # type: ignore[attr-defined]
+    services.insights = insights  # type: ignore[attr-defined]
+    services.feedback = feedback  # type: ignore[attr-defined]
+    services.presence = presence  # type: ignore[attr-defined]
     services.aclose = aclose  # type: ignore[attr-defined]
     return services

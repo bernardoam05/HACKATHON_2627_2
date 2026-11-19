@@ -113,7 +113,14 @@ class DeviceRegistry:
     async def write(self, device_id: str, update: CapabilityUpdate) -> Device:
         """The single write path to devices (executor + manual control)."""
         device = await self.get_device(device_id)
-        updated = await self._clients[device.source].update_capabilities(device_id, update)
+        client = self._clients[device.source]
+        if update.type == "securityStatus":  # alarm: not a device capability on Altice
+            set_status = getattr(client, "set_security_status", None)
+            if set_status is None:
+                raise NotImplementedError(f"{device.source.value} has no security status tool")
+            await set_status(str(update.value))
+            return device
+        updated = await client.update_capabilities(device_id, update)
         if updated is None:
             updated = await self._clients[device.source].get_device(device_id)
         [merged] = await self._apply_overrides([updated])
