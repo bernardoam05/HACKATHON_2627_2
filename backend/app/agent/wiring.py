@@ -35,6 +35,20 @@ from .tools import PresenceWatcher
 log = logging.getLogger(__name__)
 
 
+def _configure_app_logging() -> None:
+    """uvicorn only configures its own loggers: show the app's INFO lines (agent runs, polls)
+    on stderr, once, unless someone already attached a handler."""
+    app_log = logging.getLogger("app")
+    if app_log.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s",
+                                           "%H:%M:%S"))
+    app_log.addHandler(handler)
+    app_log.setLevel(logging.INFO)
+    app_log.propagate = False
+
+
 # Provider prefix of AGENT_MODEL ("anthropic:claude-...") -> the env var its SDK reads.
 PROVIDER_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -78,6 +92,7 @@ async def build_services(
 
     Extra attributes on the returned container: `poller`, `scheduler`, `repo`, `aclose()`.
     """
+    _configure_app_logging()
     export_agent_api_key(settings)
     repo = Repository(await init_db(settings.DB_PATH))
     if clients is None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from pydantic_ai.exceptions import (
     ModelUnavailableError,
     UsageLimitExceeded,
 )
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.usage import UsageLimits
@@ -112,6 +114,18 @@ AUTO_MODELS: tuple[str, ...] = (
     "google:gemini-3-flash",
     "google:gemini-2.5-flash",
 )
+
+
+def _log_run(trigger: DecisionTrigger, seconds: float, result: Any) -> None:
+    """One line per agent run: duration, model round-trips, models used, tools called."""
+    try:
+        responses = [m for m in result.all_messages() if isinstance(m, ModelResponse)]
+    except Exception:  # noqa: BLE001 - logging must never break a run
+        return
+    tools = [p.tool_name for m in responses for p in m.parts if isinstance(p, ToolCallPart)]
+    models = sorted({m.model_name for m in responses if m.model_name})
+    log.info("agent run done (%s) in %.1fs: %d model requests via %s, tools=%s",
+             trigger.value, seconds, len(responses), ",".join(models) or "?", tools)
 
 
 def model_names(spec: str) -> list[str]:
@@ -347,11 +361,17 @@ class HomeAgent:
                 self._registry, self._repo, self._plugins, self.clock.now,
                 empty_after_seconds=self._settings.EMPTY_AFTER_MINUTES * 60,
             )
+            started = time.monotonic()
+            log.info("agent run started (%s, %s mode, %d changes)",
+                     trigger.value, run_input.mode, len(changes))
             try:
                 result = await self._run_llm(prompt, deps)
-            except BaseException:
+            except BaseException as e:
+                log.info("agent run failed after %.1fs: %s", time.monotonic() - started,
+                         type(e).__name__)
                 self._wake_reasons = wake_reasons + self._wake_reasons  # retry them next run
                 raise
+            _log_run(trigger, time.monotonic() - started, result)
             decision = await self._finish(result.output, trigger, run_input)
             self._last_cutoff = cutoff
             return decision
