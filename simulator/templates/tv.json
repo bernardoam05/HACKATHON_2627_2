@@ -1,26 +1,10 @@
 {
   "type": "tv",
-  "name": "TV",
-  "categories": [
-    "entertainment"
-  ],
+  "name": "Televisão",
+  "categories": ["entertainment"],
   "capabilities": [
-    {
-      "type": "power",
-      "name": "power",
-      "value": false
-    },
-    {
-      "type": "volume",
-      "name": "volume",
-      "value": 20,
-      "min": 0,
-      "max": 100
-    },
-    {
-      "type": "instantPower",
-      "name": "instantPower",
-      "value": 0
-    }
+    { "name": "", "type": "power", "availableValues": ["on", "off"], "value": "off" },
+    { "name": "", "type": "volume", "value": 20, "min": 0, "max": 100 },
+    { "name": "", "type": "instantPower", "value": 0, "min": 0, "max": 50000 }
   ]
 }

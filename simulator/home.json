@@ -1,0 +1,14 @@
+{
+  "_comment": "Default simulated house, loaded at startup and by scenarios with no 'devices'. Ids are stable so backend room assignments survive restarts.",
+  "devices": [
+    { "id": "sim-tv-sala", "template": "tv", "name": "Televisão da sala", "roomName": "Sala" },
+    { "id": "sim-luz-sala", "template": "bulb", "name": "Luz da sala", "roomName": "Sala" },
+    { "id": "sim-movimento-sala", "template": "motionSensor", "name": "Movimento da sala", "roomName": "Sala" },
+    { "id": "sim-luz-cozinha", "template": "bulb", "name": "Luz da cozinha", "roomName": "Cozinha" },
+    { "id": "sim-movimento-cozinha", "template": "motionSensor", "name": "Movimento da cozinha", "roomName": "Cozinha" },
+    { "id": "sim-cafe-cozinha", "template": "coffee_plug", "name": "Máquina de café", "roomName": "Cozinha" },
+    { "id": "sim-luz-corredor", "template": "bulb", "name": "Luz do corredor", "roomName": "Corredor" },
+    { "id": "sim-movimento-corredor", "template": "motionSensor", "name": "Movimento do corredor", "roomName": "Corredor" },
+    { "id": "sim-porta-entrada", "template": "contactSensor", "name": "Porta de entrada", "roomName": "Entrada" }
+  ]
+}

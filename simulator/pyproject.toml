@@ -2,4 +2,5 @@
 name = "home-simulator"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["mcp"]
+# mcp 2.x: FastMCP was renamed to MCPServer (mcp.server.mcpserver); same major as backend/uv.lock.
+dependencies = ["mcp>=2.3,<3", "pyyaml>=6"]

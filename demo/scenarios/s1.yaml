@@ -1,6 +1,9 @@
 name: s1
 description: TV turns on in the evening -> living-room light dims
 now_override: null  # e.g. 2026-11-19T21:00:00
-devices: []   # Team B: start state loaded by sim_load_scenario
+devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
+state:        # applied by sim_load_scenario after the reset, as physical events
+  sim-tv-sala: {power: "off"}
+  sim-luz-sala: {power: "on", brightness: 80}
 steps: []     # Team B: ordered sim_set_state calls with delays
 expect: []    # Team B: expected agent actions
