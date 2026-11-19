@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ALTICE_MCP_TOKEN: str = ""
     SIM_MCP_URL: str = "http://localhost:8100/mcp"
     AGENT_MODEL: str = "anthropic:claude-sonnet-5-5"
+    # Key for the AGENT_MODEL provider; exported to its standard variable (ANTHROPIC_API_KEY,
+    # OPENAI_API_KEY, ...) at startup, because values read from .env are not process env vars.
+    AGENT_API_KEY: str = ""
     DB_PATH: str = "home.db"
     SIM_POLL_SECONDS: float = 2
     ALTICE_POLL_SECONDS: float = 7

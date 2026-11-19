@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any
 
 from app.api.ports import Services
@@ -29,6 +31,37 @@ from .onboarding import Onboarding
 from .reflexes import ReflexEngine
 from .tools import PresenceWatcher
 
+log = logging.getLogger(__name__)
+
+
+# Provider prefix of AGENT_MODEL ("anthropic:claude-...") -> the env var its SDK reads.
+PROVIDER_KEY_ENV = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "google-gla": "GEMINI_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "xai": "XAI_API_KEY",
+}
+
+
+def export_agent_api_key(settings: Settings) -> str | None:
+    """Make AGENT_API_KEY visible to the provider SDK. A variable already set in the real
+    environment wins. Returns the env var name used (None if nothing to do)."""
+    if not settings.AGENT_API_KEY:
+        return None
+    provider = settings.AGENT_MODEL.split(":", 1)[0] if ":" in settings.AGENT_MODEL else ""
+    var = PROVIDER_KEY_ENV.get(provider)
+    if var is None:
+        log.warning("AGENT_API_KEY set but provider %r is unknown; export its key yourself",
+                    provider)
+        return None
+    os.environ.setdefault(var, settings.AGENT_API_KEY)
+    return var
+
 
 async def build_services(
     settings: Settings,
@@ -39,6 +72,7 @@ async def build_services(
 
     Extra attributes on the returned container: `poller`, `scheduler`, `repo`, `aclose()`.
     """
+    export_agent_api_key(settings)
     repo = Repository(await init_db(settings.DB_PATH))
     if clients is None:
         clients = {}
