@@ -8,9 +8,11 @@ from app.schemas import (
     CapabilityUpdate,
     ChatRequest,
     ChatResponse,
+    CooldownUpdate,
     Decision,
     Device,
     DeviceAssignment,
+    DeviceCooldown,
     DevicePlugin,
     Insight,
     PluginProposal,
@@ -76,6 +78,23 @@ class HistoryService(Protocol):
     ) -> list[StateChange]: ...
 
 
+class CooldownService(Protocol):
+    """Device blocking after a user override (D9) and the user's options about it."""
+
+    async def list_cooldowns(self) -> list[DeviceCooldown]:
+        """Active cooldowns only."""
+        ...
+
+    async def update_cooldown(self, device_id: str, body: CooldownUpdate) -> DeviceCooldown:
+        """Shorten / extend / make indefinite (creates one with reason `user` if none is active).
+        `minutes=0` unblocks now (returns the ended cooldown). KeyError -> 404 for unknown devices."""
+        ...
+
+    async def clear_cooldown(self, device_id: str) -> None:
+        """Unblock now. Idempotent."""
+        ...
+
+
 class Services:
     """Container wired in main.py lifespan."""
 
@@ -88,6 +107,14 @@ class Services:
         agent: AgentService,
         actions: ActionService,
         history: HistoryService,
+        cooldowns: CooldownService | None = None,
     ) -> None:
         self.devices, self.rooms, self.sim = devices, rooms, sim
         self.plugins, self.agent, self.actions, self.history = plugins, agent, actions, history
+        self._cooldowns = cooldowns
+
+    @property
+    def cooldowns(self) -> CooldownService:
+        if self._cooldowns is None:
+            raise NotImplementedError("Cooldown controls are not implemented yet (Team A)")
+        return self._cooldowns

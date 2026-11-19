@@ -1,4 +1,4 @@
-"""Chat, decisions, actions, history, insights, reflexes. (Shared contract)"""
+"""Chat, decisions, actions, cooldowns, history, insights, reflexes. (Shared contract)"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,7 +10,9 @@ from app.schemas import (
     ActionRecord,
     ChatRequest,
     ChatResponse,
+    CooldownUpdate,
     Decision,
+    DeviceCooldown,
     Insight,
     Reflex,
     StateChange,
@@ -50,6 +52,25 @@ async def reject_action(action_id: str, s: Services = Depends(get_services)):
 @router.post("/actions/{action_id}/undo", response_model=ActionRecord)
 async def undo_action(action_id: str, s: Services = Depends(get_services)):
     return await s.actions.undo(action_id)
+
+
+@router.get("/cooldowns", response_model=list[DeviceCooldown])
+async def cooldowns(s: Services = Depends(get_services)):
+    """Devices the agent is leaving alone after a user override (D9)."""
+    return await s.cooldowns.list_cooldowns()
+
+
+@router.put("/cooldowns/{device_id}", response_model=DeviceCooldown)
+async def update_cooldown(device_id: str, body: CooldownUpdate, s: Services = Depends(get_services)):
+    """User options: shorter/longer, until unblocked, `minutes: 0` = unblock now;
+    `rememberForDevice` applies `minutes` to this device's future overrides (0 = never block)."""
+    return await s.cooldowns.update_cooldown(device_id, body)
+
+
+@router.delete("/cooldowns/{device_id}", status_code=204)
+async def clear_cooldown(device_id: str, s: Services = Depends(get_services)):
+    await s.cooldowns.clear_cooldown(device_id)
+    return Response(status_code=204)
 
 
 @router.get("/history/changes", response_model=list[StateChange])

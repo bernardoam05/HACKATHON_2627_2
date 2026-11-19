@@ -40,6 +40,9 @@ Device/capability field names keep **Altice camelCase** on purpose.
 - `ActionStatus` enum: `executed | pending_confirmation | rejected | undone | failed`
 - `ActionRecord {id, decisionId, deviceId, update: CapabilityUpdate, autonomy, status, expectedValue, createdAt, resolvedAt?}`
 - `UserFeedback {actionId, kind: undo | confirm | reject | manual_override, at, note?}`
+- `CooldownReason` enum: `manual_override | undo | user`
+- `DeviceCooldown {deviceId, until? (null = until the user unblocks), reason, actionId?, capability?, note? (PT-PT, what the agent did and what the user set), startedAt, defaultMinutes (next override on this device; 0 = never block)}` (D9)
+- `CooldownUpdate {minutes? (0..1440, 0 = unblock now), untilUnblocked = false, rememberForDevice = false}`: exactly one of `minutes` / `untilUnblocked`; `rememberForDevice` (only with `minutes`) makes `minutes` this device's default for future overrides
 
 ### 5.4 Agent — `schemas/agent.py`
 
@@ -90,6 +93,9 @@ Service errors map to HTTP status codes in `main.py` (body `{"detail": str}`):
 | GET | `/api/decisions?limit=50` | → `Decision[]` |
 | GET | `/api/actions?status=&limit=50` | → `ActionRecord[]` |
 | POST | `/api/actions/{id}/confirm` · `/reject` · `/undo` | → `ActionRecord` |
+| GET | `/api/cooldowns` | → `DeviceCooldown[]` (active blocks after user overrides) |
+| PUT | `/api/cooldowns/{deviceId}` | `CooldownUpdate` → `DeviceCooldown` (shorten / extend / until unblocked / remember; creates one with reason `user` if none; 422 if both or neither choice) |
+| DELETE | `/api/cooldowns/{deviceId}` | → 204 (unblock now; idempotent) |
 | GET | `/api/history/changes?deviceId=&since=&limit=` | → `StateChange[]` |
 | GET | `/api/agent/status` | → `{busy, dirty, lastRunAt, model, beliefState, runsSinceFullSnapshot}` |
 | GET | `/api/insights` | → `Insight[]` (active, sorted by confidence) |
@@ -109,6 +115,8 @@ Service errors map to HTTP status codes in `main.py` (body `{"detail": str}`):
 - `{"type":"insight_updated","insight":Insight}`
 - `{"type":"reflex_proposed"|"reflex_updated","reflex":Reflex}` → UI asks user to confirm a proposed reflex
 - `{"type":"reflex_executed","reflexId":str,"actions":ActionRecord[]}`
+- `{"type":"cooldown_started","cooldown":DeviceCooldown}` → the user overrode the agent: UI shows `note` and the options (keep, shorter/longer, until unblocked, unblock now, remember for this device). The overridden action also arrives as `action_updated` with status `undone`. Also sent again (same `deviceId`, replace the previous one) when the user changes a block with PUT.
+- `{"type":"cooldown_ended","deviceId":str,"reason":"expired"|"user"}`
 
 ### 5.7 Simulator MCP — `simulator/` (Team B), consumed by `mcp_clients/sim.py` (Team A)
 

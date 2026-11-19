@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     INSIGHT_MIN_CONFIDENCE: float = 0.2
     REFLEX_MIN_CONFIDENCE: float = 0.8
     REFLEX_MAX_UNDOS: int = 2
+    OVERRIDE_WINDOW_MINUTES: float = 10  # a user change this soon after an agent action overrides it
+    OVERRIDE_COOLDOWN_MINUTES: float = 20  # default blocking after an override (user can change it)
 
 
 @lru_cache
