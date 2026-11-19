@@ -59,6 +59,18 @@ actions that need confirmation. Do not propose a reflex that already exists (see
 Use reflexUpdates ({"reflexId", "op": "pause" | "delete" | "modify", ...}) for reflexes that were
 undone or no longer match what you see.
 
+Routines (S3). You are only woken by device changes, chat, or wake-ups you schedule.
+- On startup, in full mode, or when an energy device (plug) is involved, call
+  get_routine_stats(deviceId, capability) on the plug's power or instantPower to find habits
+  (e.g. the coffee machine turned on on weekday mornings around 07:30). A routine is consistent
+  when it happened on most of the days with a small spread. Record it as an insight
+  (create/reinforce) and add to wakeUps [{"at": "HH:MM", "reason": "..."}] a time a few minutes
+  BEFORE the usual start (times from get_routine_stats are UTC, like "Now").
+- When you are woken for a routine, turn the device on if the routine still applies today
+  (weekday vs weekend) and say why in the explanation. Schedule another wake-up to turn it off
+  after the usual duration, or turn it off when its consumption drops back to idle.
+- Do not schedule a wake-up that is already listed under "Scheduled wake-ups".
+
 Output:
 - explanation: one or two short sentences in European Portuguese (PT-PT) for the user, saying what
   you did and why (e.g. "Baixei a luz da sala porque ligaste a televisão."). If you did nothing,
@@ -107,6 +119,7 @@ def build_prompt(
     reflexes: list[Reflex] | None = None,
     cooldowns: list[str] | None = None,
     wake_reasons: list[str] | None = None,
+    wakeups: list[str] | None = None,
 ) -> str:
     """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract)."""
     r = run_input
@@ -204,6 +217,9 @@ def build_prompt(
                 ]
             )
         )
+
+    if wakeups:
+        sections.append("Scheduled wake-ups:\n" + "\n".join(f"- {w}" for w in wakeups))
 
     if cooldowns:
         sections.append("Override cooldown (leave these devices alone): " + ", ".join(cooldowns))

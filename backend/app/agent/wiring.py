@@ -25,6 +25,7 @@ from .agent import Clock, HomeAgent
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
+from .onboarding import Onboarding
 from .reflexes import ReflexEngine
 from .tools import PresenceWatcher
 
@@ -50,7 +51,8 @@ async def build_services(
 
     rooms = RoomStore(repo)
     registry = DeviceRegistry(repo, rooms, clients)
-    plugins = PluginRegistry(repo, devices=registry.list_devices)
+    onboarding = Onboarding(model or settings.AGENT_MODEL)
+    plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
     clock = Clock(settings.NOW_OVERRIDE)
     insights = InsightEngine(
@@ -100,6 +102,7 @@ async def build_services(
 
     async def aclose() -> None:
         presence.cancel()
+        agent.wakeups.cancel_all()
         await scheduler.stop()
         for c in clients.values():
             await c.close()
@@ -113,4 +116,5 @@ async def build_services(
     services.feedback = feedback  # type: ignore[attr-defined]
     services.presence = presence  # type: ignore[attr-defined]
     services.aclose = aclose  # type: ignore[attr-defined]
+    services.on_ready = agent.request_startup  # type: ignore[attr-defined]
     return services

@@ -123,11 +123,17 @@ class Poller:
     async def _loop(self, source: DeviceSource) -> None:
         interval = self._intervals.get(source, 5.0)
         while True:
-            await self.poll_once(source)
             await asyncio.sleep(interval)
+            await self.poll_once(source)
 
-    async def run(self) -> None:
-        """Run every source loop until cancelled."""
+    async def run(self, on_ready: Callable[[], Awaitable[None]] | None = None) -> None:
+        """Baseline poll of every source, then `on_ready()` (startup run), then loop until cancelled."""
+        await asyncio.gather(*(self.poll_once(s) for s in self._registry.sources))
+        if on_ready is not None:
+            try:
+                await on_ready()
+            except Exception:
+                log.exception("poller on_ready failed")
         await asyncio.gather(*(self._loop(s) for s in self._registry.sources))
 
 
@@ -142,4 +148,4 @@ async def run_poller(services: Any) -> None:
     poller: Poller | None = getattr(services, "poller", None)
     if poller is None:
         raise NotImplementedError("Poller is not wired into Services yet (Team A)")
-    await poller.run()
+    await poller.run(getattr(services, "on_ready", None))
