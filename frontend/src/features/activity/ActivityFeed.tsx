@@ -147,7 +147,8 @@ function DecisionEntry({ decision, actions, reflexIds, onResolved }: {
         </div>
       </div>
     }>
-      <DecisionCard decision={decision} showExplanation={false} />
+      {/* Action records below already list each change (with status/Undo), so the card skips its chips. */}
+      <DecisionCard decision={decision} showExplanation={false} showActions={actions.length === 0} />
       {actions.length > 0 && (
         <ul className="m-0 grid list-none gap-1.5 p-0">
           {actions.map((a) => (
