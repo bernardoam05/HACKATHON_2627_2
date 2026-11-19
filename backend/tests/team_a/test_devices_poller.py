@@ -9,12 +9,13 @@ from typing import Any
 
 import pytest
 from mcp.server.mcpserver import MCPServer
+from mcp.shared.exceptions import MCPError
 from pydantic import BaseModel
 
 from app.devices.registry import DeviceRegistry
 from app.devices.rooms import RoomStore
 from app.mcp_clients.altice import AlticeClient
-from app.mcp_clients.base import McpUnavailable
+from app.mcp_clients.base import McpToolError, McpUnavailable
 from app.mcp_clients.sim import SimClient
 from app.poller.diff import DEVICE_PRESENCE
 from app.poller.poller import Poller
@@ -155,6 +156,36 @@ async def test_unreachable_source_raises_unavailable():
     with pytest.raises(McpUnavailable):
         await client.list_devices()
     await client.close()
+
+
+async def test_jsonrpc_error_is_a_tool_error_and_keeps_the_session(monkeypatch):
+    """The real Altice MCP answers e.g. -32602 'tool not allowed for this client_type':
+    the server is reachable, so no reconnect and McpToolError, not McpUnavailable."""
+
+    class RefusingClient:
+        calls = 0
+
+        async def call_tool(self, name, arguments):
+            RefusingClient.calls += 1
+            raise MCPError(-32602, "tool not allowed for this client_type")
+
+    client = AlticeClient("http://unused/mcp")
+    session = RefusingClient()
+    resets = 0
+
+    async def ensure():
+        return session
+
+    async def reset():
+        nonlocal resets
+        resets += 1
+
+    monkeypatch.setattr(client, "_ensure", ensure)
+    monkeypatch.setattr(client, "_reset", reset)
+    for _ in range(2):
+        with pytest.raises(McpToolError, match=r"\[-32602\] tool not allowed"):
+            await client.list_devices()
+    assert RefusingClient.calls == 2 and resets == 0
 
 
 async def test_poller_baseline_then_change_wakes_agent(world):
