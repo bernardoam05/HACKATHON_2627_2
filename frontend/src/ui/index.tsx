@@ -31,6 +31,22 @@ export function Expandable({ summary, children, defaultOpen = false, className =
   );
 }
 
+/** Shared look for <input>, <select> and <textarea>. text-base on phones avoids iOS zoom. */
+export const inputClass =
+  "w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-base text-ink outline-none " +
+  "placeholder:text-muted focus:border-accent disabled:opacity-60 sm:text-sm";
+
+/** Label above a control; `hint` is a short muted line below. */
+export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="grid gap-1 text-sm">
+      <span className="font-medium">{label}</span>
+      {children}
+      {hint && <span className="text-xs text-muted">{hint}</span>}
+    </label>
+  );
+}
+
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 
 const BUTTON: Record<Variant, string> = {

@@ -8,24 +8,52 @@ import { useLiveMessages } from "./LiveProvider";
 interface DevicesValue {
   devices: Device[];
   byId: Map<string, Device>;
+  loading: boolean;
+  error: string | undefined;
   reload: () => void;
+  /** Replace (or add) one device locally, e.g. with the backend's response to an edit. */
+  upsert: (d: Device) => void;
+  remove: (id: string) => void;
 }
 
 const DevicesContext = createContext<DevicesValue | null>(null);
 
+function replace(list: Device[] | undefined, d: Device): Device[] {
+  const ds = list ?? [];
+  return ds.some((x) => x.id === d.id) ? ds.map((x) => (x.id === d.id ? d : x)) : [...ds, d];
+}
+
 export function DevicesProvider({ children }: { children: ReactNode }) {
   const res = useResource(api.devices);
+  const { setData } = res;
   useLiveMessages((m) => {
-    if (m.type === "device_added") {
-      res.setData((ds) => [...(ds ?? []).filter((d) => d.id !== m.device.id), m.device]);
-    } else if (m.type === "device_removed") {
-      res.setData((ds) => (ds ?? []).filter((d) => d.id !== m.device.id));
+    if (m.type === "device_added") setData((ds) => replace(ds, m.device));
+    else if (m.type === "device_removed") setData((ds) => (ds ?? []).filter((d) => d.id !== m.device.id));
+    else if (m.type === "state_changed") {
+      // Keep capability values live without refetching the whole list.
+      setData((ds) => ds?.map((d) => {
+        const changes = m.changes.filter((c) => c.deviceId === d.id);
+        if (changes.length === 0) return d;
+        const capabilities = d.capabilities.map((cap) => {
+          const c = [...changes].reverse().find((x) => x.capability === cap.type); // latest wins
+          return c ? { ...cap, value: c.new ?? null } : cap;
+        });
+        return { ...d, capabilities };
+      }));
     }
   });
   const value = useMemo(() => {
     const devices = res.data ?? [];
-    return { devices, byId: new Map(devices.map((d) => [d.id, d])), reload: res.reload };
-  }, [res.data, res.reload]);
+    return {
+      devices,
+      byId: new Map(devices.map((d) => [d.id, d])),
+      loading: res.loading,
+      error: res.error,
+      reload: res.reload,
+      upsert: (d: Device) => setData((ds) => replace(ds, d)),
+      remove: (id: string) => setData((ds) => (ds ?? []).filter((d) => d.id !== id)),
+    };
+  }, [res.data, res.loading, res.error, res.reload, setData]);
   return <DevicesContext.Provider value={value}>{children}</DevicesContext.Provider>;
 }
 
