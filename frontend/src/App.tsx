@@ -9,7 +9,8 @@ import DeviceList from "./features/manager/DeviceList";
 import PluginConfig from "./features/manager/PluginConfig";
 import RoomEditor from "./features/manager/RoomEditor";
 import { useLive } from "./live/LiveProvider";
-import { Badge, Dot } from "./ui";
+import { useTheme } from "./lib/theme";
+import { Badge, Dot, MoonIcon, SunIcon } from "./ui";
 
 const TABS = [
   { id: "chat", label: "Chat" },
@@ -32,7 +33,10 @@ export default function App() {
     <div className="mx-auto max-w-5xl px-4 pb-4 sm:pb-12">
       <header className="flex items-center justify-between gap-3 pb-2 pt-3 sm:pb-3 sm:pt-4">
         <h1 className="text-[17px] font-semibold sm:text-lg">Casa Inteligente</h1>
-        <StatusBar />
+        <div className="flex items-center gap-2">
+          <StatusBar />
+          <ThemeToggle />
+        </div>
       </header>
       <nav role="tablist"
            className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line sm:mb-5
@@ -55,6 +59,19 @@ export default function App() {
         <div hidden={tab !== "manager"} className="grid gap-4"><DeviceList /><RoomEditor /><PluginConfig /></div>
       </main>
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, toggle] = useTheme();
+  const dark = theme === "dark";
+  const label = dark ? "Mudar para modo claro" : "Mudar para modo escuro";
+  return (
+    <button type="button" onClick={toggle} aria-label={label} title={label}
+      className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg text-muted hover:bg-surface-2
+                 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+      {dark ? <SunIcon className="size-[18px]" /> : <MoonIcon className="size-[18px]" />}
+    </button>
   );
 }
 

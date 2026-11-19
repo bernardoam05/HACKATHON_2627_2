@@ -1,4 +1,5 @@
-/* Owner: Team B. Tailwind v4 + design tokens. Light/dark follow the OS setting.
+/* Owner: Team B. Tailwind v4 + design tokens. Theme = <html data-theme="light|dark">, set before
+   first paint by index.html (saved choice, else the OS setting) and toggled by ThemeToggle.
    Tokens become utilities: bg-canvas, bg-surface, text-ink, text-muted, border-line,
    bg-accent / bg-accent-soft, text-good / bg-good-soft, warn, bad. */
 @import "tailwindcss";
@@ -22,8 +23,9 @@
   --color-bad-soft: #f7dede;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root { color-scheme: light; }
+
+:root[data-theme="dark"] {
     --color-canvas: #141513;
     --color-surface: #1d1f1c;
     --color-surface-2: #262825;
@@ -39,7 +41,6 @@
     --color-bad: #ec8a8a;
     --color-bad-soft: #3b2222;
     color-scheme: dark;
-  }
 }
 
 @layer base {
