@@ -1,0 +1,58 @@
+{
+  "name": "Security hub",
+  "id": "87dc1a7d-9397-45fa-8a7d-2d27fc3c2d3d",
+  "type": "gateway",
+  "capabilities": [
+    {
+      "name": "",
+      "type": "cellularState",
+      "availableValues": ["none", "ready", "normal", "abnormal"],
+      "value": "none"
+    },
+    {
+      "name": "",
+      "type": "tamperState",
+      "availableValues": ["normal", "alarm"],
+      "value": "normal"
+    },
+    {
+      "name": "",
+      "type": "networkMode",
+      "availableValues": ["ethernet", "wifi", "cellular"],
+      "value": "wifi"
+    },
+    { "name": "", "type": "restart", "value": true },
+    { "name": "", "type": "factoryReset", "value": false },
+    {
+      "name": "",
+      "type": "cellularSignalStrength",
+      "availableValues": ["bad", "general", "good", "great"],
+      "value": "great"
+    },
+    {
+      "name": "",
+      "type": "wifiSignalStrength",
+      "availableValues": ["bad", "general", "good", "great"],
+      "value": "general"
+    },
+    { "name": "", "type": "batteryLevel", "value": 30, "min": 0, "max": 100 },
+    { "name": "", "type": "chargeState", "value": true },
+    { "name": "", "type": "cellularAllowed", "value": true },
+    {
+      "name": "",
+      "type": "alarmState",
+      "availableValues": ["normal", "alarm"],
+      "value": "alarm"
+    },
+    {
+      "name": "",
+      "type": "cellularConnectionState",
+      "availableValues": ["searching", "normal", "abnormal"],
+      "value": "abnormal"
+    }
+  ],
+  "categories": ["security"],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793978810991,
+  "pairedTime": 1793794173496
+}

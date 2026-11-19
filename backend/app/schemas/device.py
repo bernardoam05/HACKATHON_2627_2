@@ -33,7 +33,7 @@ class Device(BaseModel):
     capabilities: list[Capability] = []
     categories: list[str] = []
     roomName: str | None = None
-    lastCommunicationTime: str | None = None
+    lastCommunicationTime: int | str | None = None  # Altice sends epoch millis
     # Ours
     source: DeviceSource = DeviceSource.altice
     alias: str | None = None

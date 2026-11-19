@@ -1,0 +1,35 @@
+{
+  "name": "Smoke sensor",
+  "id": "fe0d7817-a75b-4737-8bdf-190b20e9fe20",
+  "type": "smokeSensor",
+  "capabilities": [
+    {
+      "name": "",
+      "type": "sensorState",
+      "availableValues": ["normal", "alarm"],
+      "value": "alarm"
+    },
+    {
+      "name": "",
+      "type": "tamperState",
+      "availableValues": ["normal", "alarm"],
+      "value": "normal"
+    },
+    {
+      "name": "",
+      "type": "batteryStatus",
+      "availableValues": ["low", "medium", "high"],
+      "value": "high"
+    },
+    {
+      "name": "",
+      "type": "signalStrength",
+      "availableValues": ["low", "medium", "high"],
+      "value": "high"
+    }
+  ],
+  "categories": ["security"],
+  "roomName": "Hack 5",
+  "lastCommunicationTime": 1793978811145,
+  "pairedTime": 1793800857066
+}

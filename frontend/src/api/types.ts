@@ -24,7 +24,7 @@ export interface Device {
   capabilities: Capability[];
   categories: string[];
   roomName?: string | null;
-  lastCommunicationTime?: string | null;
+  lastCommunicationTime?: number | string | null; // Altice: epoch millis
   source: DeviceSource;
   alias?: string | null;
   roomId?: string | null;
