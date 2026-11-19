@@ -54,7 +54,13 @@ from .feedback import FeedbackService
 from .insights import InsightEngine
 from .prompts import build_prompt, instructions, room_of
 from .reflexes import ReflexDraft, ReflexEngine, ReflexUpdateDraft
-from .tools import AgentDeps, register_tools
+from .tools import (
+    DOOR_CAPABILITIES,
+    AgentDeps,
+    compute_presence_facts,
+    compute_routine_stats,
+    register_tools,
+)
 
 log = logging.getLogger(__name__)
 
@@ -314,9 +320,8 @@ class HomeAgent:
         """First run after the initial poll: full snapshot, check routines, schedule wake-ups."""
         self._startup = True
         await self.wake(
-            "The backend just started. Call get_routine_stats once for each plug "
-            "(capability instantPower), schedule wakeUps for the routines you find, and answer. "
-            "Do not inspect other devices' history now."
+            "The backend just started. Look at the plugs' routine stats below, schedule wakeUps "
+            "for the consistent routines you find, and answer."
         )
 
     async def wake(self, reason: str) -> None:
@@ -347,13 +352,17 @@ class HomeAgent:
                 return None
 
             run_input = await self.build_input(changes, chat=user_message is not None)
+            devices = await self._registry.list_devices()
+            presence, routines = await self._inline_facts(trigger, changes, wake_reasons, devices)
             prompt = build_prompt(
                 run_input,
                 reflexes=await self._repo.list_reflexes(),
                 cooldowns=list(self._feedback.cooldowns()),
                 wake_reasons=wake_reasons,
                 wakeups=[f"{w.isoformat(timespec='minutes')} {r}" for w, r in self.wakeups.pending()],
-                devices=await self._registry.list_devices(),
+                devices=devices,
+                presence=presence,
+                routines=routines,
             )
             if user_message is not None:
                 prompt += (
@@ -367,11 +376,10 @@ class HomeAgent:
             )
             # Tools only where they add something: chat, startup, full mode, or a wake-up
             # (door timer -> presence facts, routine -> stats). Plain deltas: 1 request.
-            use_tools = (
-                trigger != DecisionTrigger.state_change
-                or bool(wake_reasons)
-                or run_input.mode == "full"
-            )
+            # Automatic runs get the facts they would ask for inlined (presence after a door
+            # event or wake-up, routine stats at startup / routine wake-ups) and decide in one
+            # request. Only chat keeps the tools, for questions the prompt cannot anticipate.
+            use_tools = trigger == DecisionTrigger.chat
             if not use_tools:
                 prompt += NO_TOOLS_NOTE
             started = time.monotonic()
@@ -388,6 +396,28 @@ class HomeAgent:
             decision = await self._finish(result.output, trigger, run_input)
             self._last_cutoff = cutoff
             return decision
+
+    async def _inline_facts(
+        self, trigger: DecisionTrigger, changes: list, wake_reasons: list[str], devices: list
+    ) -> tuple[dict | None, list[dict] | None]:
+        """Facts the agent would otherwise fetch with tools (same raw data, no inference)."""
+        presence = None
+        door_changed = any(c.capability in DOOR_CAPABILITIES for c in changes)
+        if door_changed or wake_reasons or trigger == DecisionTrigger.startup:
+            facts = await compute_presence_facts(
+                self._registry, self._repo, self._settings.EMPTY_AFTER_MINUTES * 60
+            )
+            presence = facts.model_dump(mode="json")
+        routines = None
+        routine_wake = any("Scheduled wake-up" in w for w in wake_reasons)
+        if trigger == DecisionTrigger.startup or routine_wake:
+            routines = []
+            for d in devices:
+                if d.enabled and d.type == "plug":
+                    stats = await compute_routine_stats(self._repo, d.id, "instantPower")
+                    stats.pop("byDay", None)  # the summaries are enough; keeps the prompt small
+                    routines.append({"name": d.alias or d.name, **stats})
+        return presence, routines
 
     async def _run_llm(self, prompt: str, deps: AgentDeps, use_tools: bool = True) -> Any:
         """agent.run with retries on transient provider errors (503 overloaded, 429, network).

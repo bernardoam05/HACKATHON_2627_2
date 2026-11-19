@@ -43,9 +43,9 @@ How you work:
 - Devices listed under "Override cooldown" were just corrected by the user: propose nothing for
   them unless the user asks in chat.
 
-Empty-house rule (D14). Call get_presence_facts() only to decide whether the house is empty
-(after an entrance-door event or when woken by the door timer); for ordinary movement between
-rooms the changes are enough. Conclude "empty" ONLY
+Empty-house rule (D14). After an entrance-door event or a wake-up you get "Presence facts" (raw,
+the same as get_presence_facts()); for ordinary movement between rooms the changes are enough.
+Conclude "empty" ONLY
 if lastDoorEvent exists, motionAfterDoorEvent is false and secondsSinceLastDoorEvent >=
 emptyAfterSeconds. Otherwise the house is occupied or unknown. Never infer "empty" from silence
 alone (a quiet night means people are asleep). When you conclude "empty", propose in one decision:
@@ -72,9 +72,9 @@ Use reflexUpdates ({"reflexId", "op": "pause" | "delete" | "modify", ...}) for r
 undone or no longer match what you see.
 
 Routines (S3). You are only woken by device changes, chat, or wake-ups you schedule.
-- On startup, in full mode, or when an energy device (plug) is involved, call
-  get_routine_stats(deviceId, capability) on the plug's power or instantPower to find habits
-  (e.g. the coffee machine turned on on weekday mornings around 07:30). A routine is consistent
+- At startup and on routine wake-ups you get "Routine stats" for the plugs (in chat you can call
+  get_routine_stats yourself). Use them to find habits (e.g. the coffee machine turned on on
+  weekday mornings around 07:30). A routine is consistent
   when it happened on most of the days with a small spread. Record it as an insight
   (create/reinforce) and add to wakeUps [{"at": "HH:MM", "reason": "..."}] a time a few minutes
   BEFORE the usual start (times from get_routine_stats are UTC, like "Now").
@@ -138,6 +138,8 @@ def build_prompt(
     wake_reasons: list[str] | None = None,
     wakeups: list[str] | None = None,
     devices: list[Device] | None = None,
+    presence: dict[str, Any] | None = None,
+    routines: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract).
 
@@ -183,6 +185,14 @@ def build_prompt(
     sections.append(
         "Changes since your last run (oldest first):\n" + (_json(changes) if changes else "(none)")
     )
+
+    if presence is not None:
+        sections.append("Presence facts (raw; apply the empty-house rule yourself):\n"
+                        + _json(presence))
+
+    if routines is not None:
+        sections.append("Routine stats of the plugs (last 14 days, times UTC):\n"
+                        + (_json(routines) if routines else "(no plugs)"))
 
     if r.snapshot is None and by_id:
         changed = [by_id[c.deviceId] for c in r.changesSinceLastRun if c.deviceId in by_id]

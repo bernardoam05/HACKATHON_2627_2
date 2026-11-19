@@ -147,15 +147,26 @@ class ToolLooper:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, json.dumps(out))])
 
 
-async def test_tool_loop_is_cut_and_the_agent_still_decides():
+async def test_tool_loop_in_chat_is_cut_and_the_agent_still_decides():
+    """Only chat runs have tools; a model that loops on them is cut and forced to answer."""
+    from app.schemas import ChatRequest
+
     looper = ToolLooper()
-    decisions, _ = await run_once(Flaky(0, RuntimeError()), model=FunctionModel(looper))
-    assert len(decisions) == 1 and decisions[0].actions[0].update.value == 30
-    assert looper.calls == MAX_MODEL_REQUESTS + 1  # capped run + one forced answer, no tools
-    assert "No tools are available now" in looper.prompts[-1]
-    # plugin starterAutomations reach the prompt as expectedBehaviours
-    assert "expectedBehaviours" in looper.prompts[0]
-    assert "Baixar a luz" in looper.prompts[0]
+    srv = fake_server(sim_devices(), with_sim_tools=True)
+    services = await build_services(
+        Settings(DB_PATH=":memory:", ALTICE_MCP_URL="", SIM_MCP_URL=""),
+        clients={DeviceSource.sim: SimClient(srv)}, model=FunctionModel(looper),
+    )
+    try:
+        await services.poller.poll_once(DeviceSource.sim)
+        resp = await services.agent.chat(ChatRequest(message="baixa a luz"))
+        assert resp.decision is not None and resp.decision.actions[0].update.value == 30
+        assert looper.calls == MAX_MODEL_REQUESTS + 1  # capped run + one forced answer
+        assert "No tools are available now" in looper.prompts[-1]
+        # plugin starterAutomations reach the prompt as expectedBehaviours
+        assert "expectedBehaviours" in looper.prompts[0] and "Baixar a luz" in looper.prompts[0]
+    finally:
+        await services.aclose()
 
 
 async def test_plain_delta_run_is_one_request_without_tools():

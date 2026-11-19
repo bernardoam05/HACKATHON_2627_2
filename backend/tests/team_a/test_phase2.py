@@ -327,7 +327,7 @@ async def test_presence_watcher_wakes_agent_after_door_event(home):
     await watcher.on_changes([ch("door1", "contact", True)])  # not a fixture name: ignored
     await watcher.on_changes([ch("motion1", "motionDetected", True)])  # not a door: ignored
     await asyncio.sleep(0.3)
-    assert len(reasons) == 1 and "get_presence_facts" in reasons[0]
+    assert len(reasons) == 1 and "presence facts" in reasons[0]
 
 
 async def test_wake_runs_agent_without_changes(home):

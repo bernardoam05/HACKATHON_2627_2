@@ -211,7 +211,7 @@ class PresenceWatcher:
         await asyncio.sleep(self._delay + 1)
         await self._wake(
             f"{self._delay:.0f}s have passed since the last entrance-door event. "
-            "Call get_presence_facts() and apply the empty-house rule."
+            "Apply the empty-house rule to the presence facts below."
         )
 
 

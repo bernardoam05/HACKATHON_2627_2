@@ -13,7 +13,6 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     ToolCallPart,
-    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -138,25 +137,15 @@ def _user_prompt(messages: list[ModelMessage]) -> str:
     return ""
 
 
-def _tool_return(messages: list[ModelMessage]) -> Any:
-    for m in messages:
-        if isinstance(m, ModelRequest):
-            for p in m.parts:
-                if isinstance(p, ToolReturnPart) and p.tool_name == "get_routine_stats":
-                    return p.content
-    return None
-
-
 def scripted(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
     prompt = _user_prompt(messages)
     final = info.output_tools[0].name
     out: dict[str, Any] = {"explanation": "Nada a fazer.", "beliefState": "b", "actions": []}
     if "The backend just started" in prompt:
-        stats = _tool_return(messages)
-        if stats is None:
-            return ModelResponse(parts=[ToolCallPart(
-                "get_routine_stats", {"device_id": "coffee", "capability": "instantPower"})])
-        SEEN["stats"] = stats
+        # Routine stats are inlined in the startup prompt (no tool round-trip).
+        assert not info.function_tools
+        line = re.search(r"Routine stats of the plugs \([^)]*\):\n(.+)", prompt).group(1)
+        SEEN["stats"] = json.loads(line)[0]
         now = datetime.fromisoformat(re.search(r"Now \(house local time\): (\S+)", prompt).group(1))
         out = {
             "explanation": "Aprendi que costumas fazer café por volta das 07:30 nos dias úteis.",
