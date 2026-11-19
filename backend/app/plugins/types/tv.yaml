@@ -1,0 +1,19 @@
+type: tv
+displayName: Televisão
+purpose: entertainment
+status: builtin
+capabilities:
+  - type: power
+    description: Liga/desliga
+    writable: true
+    autonomy: suggest
+  - type: volume
+    description: Volume
+    writable: true
+    autonomy: suggest
+  - type: instantPower
+    description: Consumo (W)
+    writable: false
+    autonomy: auto
+starterAutomations:
+  - Baixar a luz da sala quando a TV liga ao serão

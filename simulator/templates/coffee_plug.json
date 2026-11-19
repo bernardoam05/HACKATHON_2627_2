@@ -1,0 +1,19 @@
+{
+  "type": "plug",
+  "name": "Coffee machine plug",
+  "categories": [
+    "energy"
+  ],
+  "capabilities": [
+    {
+      "type": "power",
+      "name": "power",
+      "value": false
+    },
+    {
+      "type": "instantPower",
+      "name": "instantPower",
+      "value": 2
+    }
+  ]
+}

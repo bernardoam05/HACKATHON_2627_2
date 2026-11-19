@@ -1,0 +1,10 @@
+type: smokeSensor
+displayName: Sensor de fumo
+purpose: security
+status: builtin
+capabilities:
+  - type: smoke
+    description: Fumo detetado
+    writable: false
+    autonomy: auto
+starterAutomations: []

@@ -1,0 +1,10 @@
+.env
+*.db
+.claude/settings.local.json
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/

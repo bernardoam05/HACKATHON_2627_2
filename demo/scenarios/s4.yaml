@@ -1,0 +1,6 @@
+name: s4
+description: Door opened/closed then no motion for EMPTY_AFTER_MINUTES -> propose off, temperature, arm alarm
+now_override: null  # e.g. 2026-11-19T21:00:00
+devices: []   # Team B: start state loaded by sim_load_scenario
+steps: []     # Team B: ordered sim_set_state calls with delays
+expect: []    # Team B: expected agent actions
