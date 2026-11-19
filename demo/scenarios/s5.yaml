@@ -1,6 +1,16 @@
 name: s5
-description: New motionSensor added -> agent proposes configuration (Basic) or user edits (Advanced)
-now_override: null  # e.g. 2026-11-19T21:00:00
-devices: []   # Team B: start state loaded by sim_load_scenario
-steps: []     # Team B: ordered sim_set_state calls with delays
-expect: []    # Team B: expected agent actions
+description: New device of an unknown type is added -> agent proposes its configuration (Basic) or user edits (Advanced)
+now_override: null
+# The default house already has motion sensors (S2 needs them), so the unknown type here is a
+# smart lock that nothing in the house knows yet. Same flow as a motionSensor would have (D12).
+devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
+state: {}
+steps:
+  - {wait: 2, say: "Instalam uma fechadura inteligente na entrada.",
+     add: {template: fechaduraInteligente, name: "Fechadura da entrada", roomName: Entrada,
+           capabilities: [
+             {type: trancada, name: "", value: "on", availableValues: ["on", "off"]},
+             {type: bateria, name: "", value: 90, min: 0, max: 100}]}}
+expect:
+  # The backend notices a type with no plugin: the Gestor tab opens the Basic/Advanced dialog.
+  - {say: "Fica por configurar (pede configuração)", unconfigured: fechaduraInteligente, within: 30}

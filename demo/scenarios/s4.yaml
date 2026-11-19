@@ -1,12 +1,25 @@
 name: s4
 description: Door opened/closed then no motion for EMPTY_AFTER_MINUTES -> propose off, temperature, arm alarm
-now_override: null  # e.g. 2026-11-19T21:00:00
+now_override: null
+backend_env: {EMPTY_AFTER_MINUTES: 0.5}   # 30 s of no motion after the door closes = empty (D14)
+# Needs a room marked "É a entrada da casa" (isEntrance) holding sim-porta-entrada (Gestor tab).
 devices: []   # empty = default house (simulator/home.json); a list replaces it (same spec format)
 state:        # applied by sim_load_scenario after the reset, as physical events
   sim-luz-sala: {power: "on", brightness: 70}
   sim-luz-cozinha: {power: "on", brightness: 70}
   sim-tv-sala: {power: "on"}
   sim-porta-entrada: {sensorState: "closed"}
-  sim-movimento-sala: {motionDetected: true}
-steps: []     # Team B: ordered sim_set_state calls with delays
-expect: []    # Team B: expected agent actions
+  sim-movimento-sala: {motionDetected: false}
+steps:
+  - {wait: 3, say: "A pessoa desliga a televisão e vai para a porta.",
+     set: {device: sim-tv-sala, capability: power, value: "off"}}
+  - {wait: 2, say: "Abre a porta de entrada…",
+     set: {device: sim-porta-entrada, capability: sensorState, value: "open"}}
+  - {wait: 3, say: "…e fecha-a. A partir daqui não há movimento em casa.",
+     set: {device: sim-porta-entrada, capability: sensorState, value: "closed"}}
+expect:
+  # Lights are auto_notify: switched off with an Undo in the activity feed.
+  - {say: "A luz da sala apaga", device: sim-luz-sala, capability: power, value: "off", within: 120}
+  - {say: "A luz da cozinha apaga", device: sim-luz-cozinha, capability: power, value: "off", within: 120}
+  # The alarm is always a suggestion, on the real Altice gateway (no gateway in the simulator).
+  - {say: "Sugere armar o alarme", pending: {capability: securityStatus}, within: 120, optional: true}
