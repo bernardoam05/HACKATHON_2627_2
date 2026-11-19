@@ -3,6 +3,8 @@ import { useId, useState, type ButtonHTMLAttributes, type ReactNode } from "reac
 import { ChevronIcon } from "./icons";
 
 export * from "./icons";
+export { inputClass } from "./styles";
+export { Combobox, normalize, type ComboOption } from "./Combobox";
 
 /**
  * A box that shows `summary` and expands to show `children` (the details), so lists stay light.
@@ -30,11 +32,6 @@ export function Expandable({ summary, children, defaultOpen = false, className =
     </div>
   );
 }
-
-/** Shared look for <input>, <select> and <textarea>. text-base on phones avoids iOS zoom. */
-export const inputClass =
-  "w-full min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 text-base text-ink outline-none " +
-  "placeholder:text-muted focus:border-accent disabled:opacity-60 sm:text-sm";
 
 /** Label above a control; `hint` is a short muted line below. */
 export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {

@@ -53,8 +53,10 @@ export const api = {
   deleteRoom: (id: string) => http<void>("DELETE", `/api/rooms/${id}`),
   plugins: () => http<DevicePlugin[]>("GET", "/api/plugins"),
   unconfigured: () => http<string[]>("GET", "/api/plugins/unconfigured"),
-  proposePlugin: (type: string) => http<PluginProposal>("POST", `/api/plugins/${type}/propose`),
-  savePlugin: (type: string, p: DevicePlugin) => http<DevicePlugin>("PUT", `/api/plugins/${type}`, p),
+  proposePlugin: (type: string) =>
+    http<PluginProposal>("POST", `/api/plugins/${encodeURIComponent(type)}/propose`),
+  savePlugin: (type: string, p: DevicePlugin) =>
+    http<DevicePlugin>("PUT", `/api/plugins/${encodeURIComponent(type)}`, p),
   chat: (b: ChatRequest) => http<ChatResponse>("POST", "/api/chat", b),
   decisions: (limit = 50) => http<Decision[]>("GET", `/api/decisions${qs({ limit })}`),
   actions: (status = "", limit = 50) => http<ActionRecord[]>("GET", `/api/actions${qs({ status, limit })}`),

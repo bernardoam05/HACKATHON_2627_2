@@ -5,7 +5,10 @@ import type { Capability, CapabilityUpdate, Device, JsonValue } from "../../api/
 import { formatValue, useDevices } from "../../live/DevicesProvider";
 import { useRooms } from "../../live/RoomsProvider";
 import { errorMessage, useResource } from "../../lib/useResource";
-import { Badge, Button, Card, Empty, ErrorNote, Expandable, Field, inputClass, Loading } from "../../ui";
+import {
+  Badge, Button, Card, Combobox, Empty, ErrorNote, Expandable, Field, inputClass, Loading, normalize,
+  type ComboOption,
+} from "../../ui";
 
 const NO_ROOM = "";
 
@@ -265,28 +268,68 @@ function RemoveSimDevice({ device }: { device: Device }) {
   );
 }
 
+// ---- add a simulated device (existing template, or a brand-new type) --------------------------------
+
+type CapKind = "onoff" | "number" | "bool" | "text";
+
+const CAP_KINDS: Record<CapKind, string> = {
+  onoff: "Ligar / desligar",
+  number: "Número (0–100)",
+  bool: "Sim / não",
+  text: "Texto",
+};
+
+interface CapDraft { key: number; name: string; kind: CapKind }
+
+/** "Fechadura inteligente" -> "fechaduraInteligente" (device types are identifiers, like "motionSensor"). */
+function toTypeId(label: string): string {
+  const words = normalize(label).replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+  return words.map((w, i) => (i === 0 ? w : w[0].toUpperCase() + w.slice(1))).join("");
+}
+
+function toCapability(c: CapDraft): Capability {
+  const type = toTypeId(c.name);
+  switch (c.kind) {
+    case "onoff": return { type, name: "", value: "off", availableValues: ["on", "off"] };
+    case "number": return { type, name: "", value: 0, min: 0, max: 100 };
+    case "bool": return { type, name: "", value: false };
+    case "text": return { type, name: "", value: "" };
+  }
+}
+
+type Choice = { kind: "template"; id: string } | { kind: "new"; label: string };
+
 function AddSimDevice({ onDone }: { onDone: () => void }) {
   const { upsert } = useDevices();
   const { rooms } = useRooms();
   const templates = useResource(api.templates);
-  const [templateId, setTemplateId] = useState("");
+  const [choice, setChoice] = useState<Choice | null>(null);
+  const [caps, setCaps] = useState<CapDraft[]>([{ key: 0, name: "", kind: "onoff" }]);
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   const list = templates.data ?? [];
-  const tpl = list.find((t) => t.id === templateId) ?? list[0];
+  const options: ComboOption[] = list.map((t) => ({ id: t.id, label: t.name, hint: t.name === t.type ? undefined : t.type }));
+  const tpl = choice?.kind === "template" ? list.find((t) => t.id === choice.id) : undefined;
+  const newType = choice?.kind === "new" ? toTypeId(choice.label) : "";
+
+  const capIds = caps.map((c) => toTypeId(c.name)).filter(Boolean);
+  const capsValid = capIds.length > 0 && capIds.length === caps.length && new Set(capIds).size === capIds.length;
+  const valid = choice?.kind === "template" ? Boolean(tpl) : choice?.kind === "new" && Boolean(newType) && capsValid;
+  const defaultName = tpl?.name ?? (choice?.kind === "new" ? choice.label : "");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!tpl) return;
+    if (!valid || !choice) return;
     setBusy(true);
     setError(undefined);
     try {
-      upsert(await api.addSimDevice({
-        type: tpl.type, template: tpl.id, name: name.trim() || tpl.name, roomId: roomId || null,
-      }));
+      const common = { name: name.trim() || defaultName, roomId: roomId || null };
+      upsert(await api.addSimDevice(tpl
+        ? { ...common, type: tpl.type, template: tpl.id }
+        : { ...common, type: newType, template: null, capabilities: caps.map(toCapability) }));
       onDone();
     } catch (err) {
       setError(errorMessage(err));
@@ -301,14 +344,15 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
       </p>
       {templates.error ? <ErrorNote message={templates.error} onRetry={templates.reload} /> : (
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Tipo">
-            <select className={inputClass} value={tpl?.id ?? ""} disabled={!list.length}
-                    onChange={(e) => setTemplateId(e.target.value)}>
-              {list.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+          <Field label="Tipo" hint={choice?.kind === "new" ? `Tipo novo: ${newType || "—"}` : undefined}>
+            <Combobox ariaLabel="Tipo" options={options} placeholder="Procurar tipo…"
+                      value={choice?.kind === "template" ? choice.id : null}
+                      onSelect={(id) => setChoice({ kind: "template", id })}
+                      onCreate={(label) => setChoice({ kind: "new", label })}
+                      createLabel={(q) => `Adicionar tipo novo "${q}"`} />
           </Field>
           <Field label="Nome">
-            <input className={inputClass} value={name} placeholder={tpl?.name ?? ""}
+            <input className={inputClass} value={name} placeholder={defaultName}
                    onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Divisão">
@@ -319,11 +363,49 @@ function AddSimDevice({ onDone }: { onDone: () => void }) {
           </Field>
         </div>
       )}
+      {choice?.kind === "new" && <NewTypeCapabilities caps={caps} onChange={setCaps} />}
       <div className="flex gap-2">
-        <Button type="submit" variant="primary" disabled={busy || !tpl}>Adicionar</Button>
+        <Button type="submit" variant="primary" disabled={busy || !valid}>Adicionar</Button>
         <Button type="button" onClick={onDone}>Cancelar</Button>
       </div>
       {error && <ErrorNote message={error} />}
     </form>
+  );
+}
+
+/** What a brand-new type can do, in plain terms; each row becomes one Altice-shaped capability. */
+function NewTypeCapabilities({ caps, onChange }: { caps: CapDraft[]; onChange: (c: CapDraft[]) => void }) {
+  const set = (key: number, patch: Partial<CapDraft>) =>
+    onChange(caps.map((c) => (c.key === key ? { ...c, ...patch } : c)));
+  const ids = caps.map((c) => toTypeId(c.name));
+  return (
+    <fieldset className="m-0 grid gap-2 rounded-lg border border-line bg-surface p-3">
+      <legend className="px-1 text-sm font-medium">O que este tipo tem</legend>
+      {caps.map((c, i) => {
+        const dup = ids[i] && ids.indexOf(ids[i]) !== i;
+        return (
+          <div key={c.key} className="grid gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <input className={`${inputClass} min-w-40 flex-1`} value={c.name} placeholder="ex. trancada, bateria"
+                     aria-label="Nome da capacidade" onChange={(e) => set(c.key, { name: e.target.value })} />
+              <select className={`${inputClass} w-auto`} value={c.kind} aria-label="Formato"
+                      onChange={(e) => set(c.key, { kind: e.target.value as CapKind })}>
+                {Object.entries(CAP_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              {caps.length > 1 && (
+                <Button variant="ghost" onClick={() => onChange(caps.filter((x) => x.key !== c.key))}>Remover</Button>
+              )}
+            </div>
+            {dup && <span className="text-xs text-bad">Nome repetido.</span>}
+          </div>
+        );
+      })}
+      <div>
+        <Button variant="ghost"
+                onClick={() => onChange([...caps, { key: Math.max(...caps.map((c) => c.key)) + 1, name: "", kind: "number" }])}>
+          + Adicionar capacidade
+        </Button>
+      </div>
+    </fieldset>
   );
 }
