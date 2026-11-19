@@ -335,6 +335,7 @@ class HomeAgent:
                 cooldowns=list(self._feedback.cooldowns()),
                 wake_reasons=wake_reasons,
                 wakeups=[f"{w.isoformat(timespec='minutes')} {r}" for w, r in self.wakeups.pending()],
+                devices=await self._registry.list_devices(),
             )
             if user_message is not None:
                 prompt += (

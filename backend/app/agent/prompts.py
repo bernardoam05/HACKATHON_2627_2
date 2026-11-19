@@ -87,13 +87,18 @@ Output:
 """
 
 
+def room_of(d: Device) -> str | None:
+    """Our room assignment first, else the room name the source reports (sim/Altice)."""
+    return d.roomId or d.roomName
+
+
 def _device_line(d: Device) -> dict[str, Any]:
     return {
         "id": d.id,
         "name": d.alias or d.name,
         "type": d.type,
         "source": d.source.value,
-        "roomId": d.roomId,
+        "room": room_of(d),
         "capabilities": {
             c.type: _cap(c.value, c.min, c.max, c.availableValues) for c in d.capabilities
         },
@@ -125,9 +130,15 @@ def build_prompt(
     cooldowns: list[str] | None = None,
     wake_reasons: list[str] | None = None,
     wakeups: list[str] | None = None,
+    devices: list[Device] | None = None,
 ) -> str:
-    """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract)."""
+    """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract).
+
+    `devices` (current state) lets a delta prompt describe each change (name, type, room) and
+    list the devices of the affected rooms, so the agent can act without tool round-trips.
+    """
     r = run_input
+    by_id = {d.id: d for d in devices or []}
     sections: list[str] = [f"Mode: {r.mode}", f"Now (house local time): {r.now.isoformat()}"]
     if wake_reasons:
         sections.append("Why you were woken up:\n" + "\n".join(f"- {w}" for w in wake_reasons))
@@ -146,12 +157,17 @@ def build_prompt(
         devices = [_device_line(d) for d in r.snapshot.devices if d.enabled]
         sections.append("Full snapshot (enabled devices):\n" + _json(devices))
 
+    def describe(device_id: str) -> dict[str, Any]:
+        d = by_id.get(device_id)
+        return {"name": d.alias or d.name, "type": d.type, "room": room_of(d)} if d else {}
+
     changes = [
         {
             "deviceId": c.deviceId,
             "capability": c.capability,
             "old": c.old,
             "new": c.new,
+            **describe(c.deviceId),
             "at": c.at.isoformat(),
             **({"causedByAgent": True, "actionId": c.actionId} if c.causedByAgent else {}),
         }
@@ -160,6 +176,17 @@ def build_prompt(
     sections.append(
         "Changes since your last run (oldest first):\n" + (_json(changes) if changes else "(none)")
     )
+
+    if r.snapshot is None and by_id:
+        changed = [by_id[c.deviceId] for c in r.changesSinceLastRun if c.deviceId in by_id]
+        rooms = {room_of(d) for d in changed if room_of(d)}
+        nearby = [d for d in by_id.values()
+                  if d.enabled and (room_of(d) in rooms or d in changed)]
+        if nearby:
+            sections.append(
+                "Devices in the affected rooms (current state):\n"
+                + _json([_device_line(d) for d in nearby])
+            )
 
     if r.plugins:
         sections.append(
