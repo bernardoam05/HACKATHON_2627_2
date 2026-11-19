@@ -24,6 +24,7 @@ from app.schemas import (
 )
 
 M = TypeVar("M", bound=BaseModel)
+_UNSET = object()
 
 
 def to_utc(dt: datetime) -> datetime:
@@ -148,12 +149,32 @@ class Repository:
 
     # --- actions ----------------------------------------------------------------------------
 
-    async def save_action(self, a: ActionRecord) -> None:
-        await self._db.execute(
-            "INSERT OR REPLACE INTO actions(id, ts, device_id, status, data) VALUES (?, ?, ?, ?, ?)",
-            (a.id, ts(a.createdAt), a.deviceId, a.status.value, a.model_dump_json()),
-        )
+    async def save_action(self, a: ActionRecord, prev_value: object = _UNSET) -> None:
+        """Insert or update. `prev_value` (the value before the action, for Undo) is kept on update."""
+        if prev_value is _UNSET:
+            await self._db.execute(
+                "INSERT INTO actions(id, ts, device_id, status, data) VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data",
+                (a.id, ts(a.createdAt), a.deviceId, a.status.value, a.model_dump_json()),
+            )
+        else:
+            await self._db.execute(
+                "INSERT OR REPLACE INTO actions(id, ts, device_id, status, data, prev_value)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (a.id, ts(a.createdAt), a.deviceId, a.status.value, a.model_dump_json(),
+                 json.dumps(prev_value, default=str)),
+            )
         await self._db.commit()
+
+    async def action_prev_value(self, action_id: str) -> tuple[bool, object]:
+        """(known, value) of the capability value before the action ran."""
+        async with self._db.execute(
+            "SELECT prev_value FROM actions WHERE id = ?", (action_id,)
+        ) as cur:
+            r = await cur.fetchone()
+        if r is None or r["prev_value"] is None:
+            return False, None
+        return True, json.loads(r["prev_value"])
 
     async def get_action(self, action_id: str) -> ActionRecord | None:
         return await self._one(ActionRecord, "SELECT data FROM actions WHERE id = ?", (action_id,))
