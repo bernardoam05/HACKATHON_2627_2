@@ -43,6 +43,7 @@ from app.schemas import (
     InsightUpdate,
     ProposedAction,
     Reflex,
+    ReflexCreate,
     ReflexStatus,
     StateSnapshot,
 )
@@ -187,6 +188,13 @@ class Clock:
         return self._base + (datetime.now(UTC) - self._start)
 
 
+DAILY_REVIEW_HOUR = 4  # house time; quiet hour, before morning routines
+DAILY_REVIEW_KEY = "agent.daily_review"
+DAILY_REVIEW = "Daily routine review."
+ROUTINE_REVIEW = (
+    "Look at the plugs' routine stats below. For a consistent routine create (or reinforce) the "
+    "insight and propose a scheduled reflex for it in this same decision; then answer."
+)
 MAX_WAKE_AHEAD = timedelta(hours=24)
 WAKE_GRACE = timedelta(minutes=10)
 
@@ -322,12 +330,22 @@ class HomeAgent:
         return await self._run(DecisionTrigger.state_change)
 
     async def request_startup(self) -> None:
-        """First run after the initial poll: full snapshot, check routines, schedule wake-ups."""
+        """First run after the initial poll: full snapshot and a routine review."""
         self._startup = True
-        await self.wake(
-            "The backend just started. Look at the plugs' routine stats below, schedule wakeUps "
-            "for the consistent routines you find, and answer."
-        )
+        await self.wake("The backend just started. " + ROUTINE_REVIEW)
+
+    async def maybe_daily_review(self) -> bool:
+        """Once per house day (from DAILY_REVIEW_HOUR): re-check routines with fresh stats, so a
+        backend that runs for weeks keeps learning, not only at startup (persisted in SQLite)."""
+        now = self.clock.now()
+        if now.hour < DAILY_REVIEW_HOUR:
+            return False
+        today = now.date().isoformat()
+        if await self._repo.kv_get(DAILY_REVIEW_KEY) == today:
+            return False
+        await self._repo.kv_set(DAILY_REVIEW_KEY, today)
+        await self.wake(f"{DAILY_REVIEW} {ROUTINE_REVIEW}")
+        return True
 
     async def wake(self, reason: str) -> None:
         """Run even without new changes (e.g. the empty-house timer)."""
@@ -415,7 +433,7 @@ class HomeAgent:
             )
             presence = facts.model_dump(mode="json")
         routines = None
-        routine_wake = any("Scheduled wake-up" in w for w in wake_reasons)
+        routine_wake = any("Scheduled wake-up" in w or DAILY_REVIEW in w for w in wake_reasons)
         if trigger == DecisionTrigger.startup or routine_wake:
             routines = []
             for d in devices:
@@ -505,8 +523,12 @@ class HomeAgent:
     ) -> Decision:
         belief = await self._belief.save(out.beliefState, run_input.mode, datetime.now(UTC))
         decision_id = uuid.uuid4().hex
-        await self._insights.apply(out.insightUpdates, decision_id)
-        proposals = await self._reflexes.accept_proposals(out.reflexProposals)
+        touched = await self._insights.apply(out.insightUpdates, decision_id)
+        proposals = await self._reflexes.accept_proposals(
+            out.reflexProposals,
+            from_user=trigger == DecisionTrigger.chat,  # the user asked: no insight needed
+            new_insight_ids=[i.id for i in touched],  # link to the insight created just now
+        )
         reflex_updates = await self._reflexes.apply_agent_updates(out.reflexUpdates)
         decision = Decision(
             id=decision_id,
@@ -553,6 +575,9 @@ class HomeAgent:
 
     async def list_reflexes(self, status: str | None) -> list[Reflex]:
         return await self._repo.list_reflexes(status)
+
+    async def create_reflex(self, body: ReflexCreate) -> Reflex:
+        return await self._reflexes.create_user_reflex(body)
 
     async def confirm_reflex(self, reflex_id: str) -> Reflex:
         return await self._reflexes.move(reflex_id, {ReflexStatus.proposed}, ReflexStatus.active)

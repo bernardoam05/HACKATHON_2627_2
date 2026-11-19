@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -33,6 +34,8 @@ from .reflexes import ReflexEngine
 from .tools import PresenceWatcher
 
 log = logging.getLogger(__name__)
+
+CLOCK_SECONDS = 30  # scheduled reflexes are checked this often (they have a 15 min catch-up)
 
 
 def _configure_app_logging() -> None:
@@ -142,6 +145,17 @@ async def build_services(
 
     scheduler = LatestWinsScheduler(run_agent, on_status)
     agent.scheduler = scheduler
+
+    async def clock() -> None:
+        """Scheduled reflexes (no LLM) and the once-a-day routine review."""
+        while True:
+            try:
+                await reflexes.tick()
+                await agent.maybe_daily_review()
+            except Exception:
+                log.exception("clock tick failed")
+            await asyncio.sleep(CLOCK_SECONDS)
+
     poller = Poller(
         registry,
         repo,
@@ -153,6 +167,7 @@ async def build_services(
         },
         hooks=[feedback, reflexes, presence],  # order matters: overrides before reflexes
         plugins=plugins,
+        background=[clock],
     )
 
     services = Services(
