@@ -228,13 +228,29 @@ async def test_mcp_tools_return_single_json_object(server) -> None:
             Device.model_validate(d)
 
         result = await client.call_tool("sim_list_templates", {})
-        assert len(result.content) == 1 and "templates" in result.structured_content
+        templates = result.structured_content["result"]  # list returns are wrapped by MCPServer
+        assert {"id", "type", "name"} <= set(templates[0])
 
         result = await client.call_tool(
             "update_device_capabilities",
             {"deviceId": "sim-luz-sala", "body": {"type": "power", "value": "on"}},
         )
         assert not result.is_error and result.structured_content["id"] == "sim-luz-sala"
+
+
+async def test_team_a_parser_reads_simulator_payloads(server) -> None:
+    """The backend's MCP result parser (app/mcp_clients/base.py) understands every sim tool."""
+    from mcp.client import Client
+
+    from app.mcp_clients.base import _parse_result
+
+    async with Client(server.mcp) as client:
+        templates = _parse_result(await client.call_tool("sim_list_templates", {}))
+        assert isinstance(templates, list) and {t["id"] for t in templates} >= {"tv", "bulb"}
+        devices = _parse_result(await client.call_tool("get_home_devices", {}))
+        assert [Device.model_validate(d) for d in devices["devices"]]
+        added = _parse_result(await client.call_tool("sim_add_device", {"template": "bulb", "name": "Teste"}))
+        assert Device.model_validate(added).type == "bulb"
 
 
 async def test_mcp_refusal_keeps_reason(server) -> None:

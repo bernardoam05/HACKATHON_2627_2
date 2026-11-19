@@ -6,8 +6,9 @@ Run: cd simulator && uv run python server.py   (http://localhost:8100/mcp, strea
 Env: SIM_HOST (127.0.0.1), SIM_PORT (8100), SIM_COFFEE_HEAT_SECONDS (120),
 SIM_MOTION_CLEAR_SECONDS (30; 0 = motion never clears by itself).
 
-Every tool returns a JSON object (one text block + structuredContent). Refused requests
-raise ToolError, so the client gets isError=True with the reason.
+Tools return JSON objects, except sim_list_templates (a list, which MCPServer wraps as
+structuredContent {"result": [...]}). Refused requests raise ToolError, so the client
+gets isError=True with the reason.
 """
 from __future__ import annotations
 
@@ -75,9 +76,9 @@ def get_home_rooms() -> dict[str, Any]:
 
 # --- Simulator-only admin tools (never used by the agent) --------------------
 @mcp.tool()
-def sim_list_templates() -> dict[str, Any]:
-    """List device templates: {"templates": [{id, type, name}]}."""
-    return {"templates": world.list_templates()}
+def sim_list_templates() -> list[dict[str, str]]:
+    """List device templates: [{id, type, name}] (structuredContent {"result": [...]})."""
+    return world.list_templates()
 
 
 @mcp.tool()
