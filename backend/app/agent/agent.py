@@ -14,7 +14,12 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, ModelUnavailableError
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    ModelQuotaExceededError,
+    ModelUnavailableError,
+)
 from pydantic_ai.models import Model
 
 from app.config import Settings
@@ -58,7 +63,10 @@ TRANSIENT_HTTP = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 def is_transient_llm_error(exc: BaseException) -> bool:
     """Worth retrying: overloaded/rate-limited provider or network trouble.
-    Not retried: bad key (401/403), unknown model, invalid request, our own bugs."""
+    Not retried: bad key (401/403), unknown model, invalid request, our own bugs, and an
+    exhausted quota (429 "check your plan and billing", no Retry-After): waiting won't help."""
+    if isinstance(exc, ModelQuotaExceededError):
+        return getattr(exc, "retry_after", None) is not None  # per-minute limit: yes; plan: no
     if isinstance(exc, ModelUnavailableError):
         return True
     if isinstance(exc, ModelHTTPError):

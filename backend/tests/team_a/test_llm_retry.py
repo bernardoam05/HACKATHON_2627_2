@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from pydantic_ai.exceptions import ModelHTTPError, ModelUnavailableError
+from pydantic_ai.exceptions import ModelHTTPError, ModelQuotaExceededError, ModelUnavailableError
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from test_devices_poller import fake_server, sim_devices
@@ -23,6 +23,9 @@ def test_transient_classification():
     assert not is_transient_llm_error(ModelHTTPError(401, "m"))  # bad key: fail fast
     assert not is_transient_llm_error(ModelHTTPError(400, "m"))  # bad request / unknown model
     assert not is_transient_llm_error(ValueError("our bug"))
+    # 429 quota: a per-minute limit (Retry-After) is worth waiting for, an exhausted plan is not
+    assert is_transient_llm_error(ModelQuotaExceededError("m", "rate", retry_after=30))
+    assert not is_transient_llm_error(ModelQuotaExceededError("m", "check your plan and billing"))
 
 
 class Flaky:
