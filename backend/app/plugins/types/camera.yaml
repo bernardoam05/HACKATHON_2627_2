@@ -2,13 +2,29 @@ type: camera
 displayName: Câmara
 purpose: security
 status: builtin
+# The Altice write tool only supports power/brightness/temperature/color_rgb, so nothing on the
+# camera is writable from here. Security capabilities are listed (always suggest) so the agent
+# knows what they mean.
 capabilities:
   - type: motionDetected
-    description: Movimento detetado
+    description: "Movimento detetado (vazio = sem movimento)"
     writable: false
     autonomy: auto
-  - type: recording
-    description: Gravação
-    writable: true
+  - type: soundDetected
+    description: "Som detetado (vazio = sem som)"
+    writable: false
+    autonomy: auto
+  - type: sdRecording
+    description: Gravação para cartão SD ativa
+    writable: false
     autonomy: suggest
-starterAutomations: []
+  - type: sirenSwitch
+    description: Sirene da câmara
+    writable: false
+    autonomy: suggest
+  - type: motionAlarmSwitch
+    description: Alarme por movimento ativo
+    writable: false
+    autonomy: suggest
+starterAutomations:
+  - Usar o movimento da câmara como sinal de presença

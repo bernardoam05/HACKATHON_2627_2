@@ -3,8 +3,16 @@ displayName: Sensor de contacto
 purpose: security
 status: builtin
 capabilities:
-  - type: contact
-    description: Aberto/fechado
+  - type: sensorState
+    description: "Porta/janela: alarm = aberta, normal = fechada"
+    writable: false
+    autonomy: auto
+  - type: tamperState
+    description: "Adulteração do sensor (alarm = adulterado)"
+    writable: false
+    autonomy: auto
+  - type: batteryStatus
+    description: "Bateria (low/medium/high)"
     writable: false
     autonomy: auto
 starterAutomations:

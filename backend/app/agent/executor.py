@@ -187,6 +187,21 @@ class Executor:
         await self._repo.save_action(record)
         await self._broadcast(ActionUpdatedMsg(action=record))
 
+    # --- manual control from the UI ---------------------------------------------------------
+
+    async def manual(self, device_id: str, update: CapabilityUpdate) -> Device:
+        """User action (POST /api/devices/{id}/capabilities). Validated like agent actions
+        (read-only -> 409, values clamped), never subject to autonomy or cooldown, and checked
+        at once against recent agent actions (D9). The resulting change is a user change, so it
+        wakes the agent like a physical one."""
+        device = await self._registry.get_device(device_id)
+        update = await self.validate(device, update)
+        updated = await self._registry.write(device_id, update)
+        if self._feedback_svc is not None:
+            await self._feedback_svc.on_manual(device_id, update.type, update.value)
+        log.info("manual control: %s %s=%r", device_id, update.type, update.value)
+        return updated
+
     # --- ActionService ----------------------------------------------------------------------
 
     async def list_decisions(self, limit: int) -> list[Decision]:

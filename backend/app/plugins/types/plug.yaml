@@ -4,15 +4,27 @@ purpose: energy
 status: builtin
 capabilities:
   - type: power
-    description: Liga/desliga
+    description: "Liga/desliga (on/off)"
     writable: true
     autonomy: auto_notify
   - type: instantPower
     description: Consumo instantâneo (W)
     writable: false
     autonomy: auto
-  - type: energyToday
-    description: Energia hoje
+  - type: instantCurrent
+    description: Corrente instantânea (mA)
+    writable: false
+    autonomy: auto
+  - type: instantVoltage
+    description: Tensão (V)
+    writable: false
+    autonomy: auto
+  - type: todayConsumption
+    description: Energia consumida hoje
+    writable: false
+    autonomy: auto
+  - type: yesterdayConsumption
+    description: Energia consumida ontem
     writable: false
     autonomy: auto
 starterAutomations:

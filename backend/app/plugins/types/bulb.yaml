@@ -4,16 +4,20 @@ purpose: comfort
 status: builtin
 capabilities:
   - type: power
-    description: Liga/desliga
+    description: "Liga/desliga (on/off)"
     writable: true
     autonomy: auto
   - type: brightness
-    description: Intensidade 0-100
+    description: Intensidade 1-100
     writable: true
     autonomy: auto
-  - type: color_rgb
-    description: Cor
+  - type: temperature
+    description: "Temperatura de cor 0-100 (0 = quente, 100 = fria)"
     writable: true
+    autonomy: auto
+  - type: workMode
+    description: "Modo (white/colour/music/scene); não pode ser alterado por aqui"
+    writable: false
     autonomy: auto
 starterAutomations:
   - Baixar a luz quando a TV liga ao serão
