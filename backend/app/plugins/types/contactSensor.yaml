@@ -8,4 +8,4 @@ capabilities:
     writable: false
     autonomy: auto
 starterAutomations:
-  - Porta de entrada: detetar saída de casa
+  - "Porta de entrada: detetar saída de casa"
