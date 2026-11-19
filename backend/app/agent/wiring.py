@@ -100,6 +100,7 @@ async def build_services(
 
     async def aclose() -> None:
         presence.cancel()
+        agent.wakeups.cancel_all()
         await scheduler.stop()
         for c in clients.values():
             await c.close()
@@ -113,4 +114,5 @@ async def build_services(
     services.feedback = feedback  # type: ignore[attr-defined]
     services.presence = presence  # type: ignore[attr-defined]
     services.aclose = aclose  # type: ignore[attr-defined]
+    services.on_ready = agent.request_startup  # type: ignore[attr-defined]
     return services

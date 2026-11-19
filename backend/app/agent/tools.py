@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -30,10 +31,24 @@ class AgentDeps:
 
 
 def register_tools(agent: Agent[AgentDeps, Any]) -> None:
-    """get_home_state, get_device, get_plugin, get_history, get_presence_facts. No write tools (D10).
+    """get_home_state, get_device, get_plugin, get_history, get_presence_facts, get_routine_stats.
 
-    TODO(Team A, phase 3): get_routine_stats.
+    No write tools (D10).
+
     """
+
+    @agent.tool
+    async def get_routine_stats(
+        ctx: RunContext[AgentDeps],
+        device_id: str,
+        capability: str,
+        days: int = 14,
+        threshold: float = 20,
+    ) -> dict[str, Any]:
+        """Daily usage of one capability over the last `days`: per day the first time it became
+        active (power on, bool true, or numeric value > threshold, e.g. watts) and for how long,
+        plus weekday/weekend medians and spread. Times are UTC. Use it to find routines."""
+        return await compute_routine_stats(ctx.deps.repo, device_id, capability, days, threshold)
 
     @agent.tool
     async def get_presence_facts(ctx: RunContext[AgentDeps]) -> dict[str, Any]:
@@ -190,3 +205,94 @@ class PresenceWatcher:
             f"{self._delay:.0f}s have passed since the last entrance-door event. "
             "Call get_presence_facts() and apply the empty-house rule."
         )
+
+
+# --- routines (S3): aggregated facts only, the agent decides what is a routine --------------
+
+
+def is_active(value: Any, threshold: float) -> bool:
+    """power "on"/True, bool True, or a numeric reading above `threshold` (e.g. watts)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return value > threshold
+    return str(value).lower() in ("on", "true")
+
+
+def _hm(dt: datetime) -> str:
+    return dt.strftime("%H:%M")
+
+
+def _minutes(hm: str) -> int:
+    h, m = hm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _summary(days: list[dict[str, Any]]) -> dict[str, Any]:
+    active = [d for d in days if d["firstOn"]]
+    if not active:
+        return {"days": len(days), "activeDays": 0}
+    starts = sorted(_minutes(d["firstOn"]) for d in active)
+    durations = sorted(d["durationMin"] for d in active if d["durationMin"] is not None)
+
+    def fmt(m: float) -> str:
+        return f"{int(m) // 60:02d}:{int(m) % 60:02d}"
+
+    return {
+        "days": len(days),
+        "activeDays": len(active),
+        "medianFirstOn": fmt(statistics.median(starts)),
+        "earliestFirstOn": fmt(starts[0]),
+        "latestFirstOn": fmt(starts[-1]),
+        "spreadMin": starts[-1] - starts[0],
+        "medianDurationMin": round(statistics.median(durations), 1) if durations else None,
+    }
+
+
+def routine_stats(
+    changes: list[StateChange], device_id: str, capability: str, days: int, threshold: float,
+    today: datetime,
+) -> dict[str, Any]:
+    """Per day: first activation time and how long it stayed active. Times are UTC."""
+    first_day = (today - timedelta(days=days - 1)).date()
+    by_day: dict[Any, dict[str, Any]] = {}
+    for i in range(days):
+        d = first_day + timedelta(days=i)
+        by_day[d] = {"date": d.isoformat(), "weekday": d.weekday(), "firstOn": None,
+                     "durationMin": None, "activations": 0}
+    active_since: datetime | None = None
+    was_active = False
+    for c in changes:  # oldest first
+        now_active = is_active(c.new, threshold)
+        day = by_day.get(c.at.date())
+        if now_active and not was_active:
+            active_since = c.at
+            if day is not None:
+                day["activations"] += 1
+                if day["firstOn"] is None:
+                    day["firstOn"] = _hm(c.at)
+        elif was_active and not now_active and active_since is not None:
+            start_day = by_day.get(active_since.date())
+            if start_day is not None and start_day["firstOn"] == _hm(active_since):
+                start_day["durationMin"] = round((c.at - active_since).total_seconds() / 60, 1)
+            active_since = None
+        was_active = now_active
+    rows = list(by_day.values())
+    return {
+        "deviceId": device_id,
+        "capability": capability,
+        "threshold": threshold,
+        "timezone": "UTC",
+        "weekdays": _summary([r for r in rows if r["weekday"] < 5]),
+        "weekends": _summary([r for r in rows if r["weekday"] >= 5]),
+        "byDay": rows,
+    }
+
+
+async def compute_routine_stats(
+    repo: Repository, device_id: str, capability: str, days: int = 14, threshold: float = 20
+) -> dict[str, Any]:
+    today = datetime.now(UTC)
+    since = datetime.combine((today - timedelta(days=days)).date(), datetime.min.time(), UTC)
+    changes = await repo.changes_between(since, today, device_id=device_id, capability=capability)
+    return routine_stats(changes, device_id, capability, days, threshold, today)
