@@ -103,11 +103,20 @@ DOOR_CAPABILITIES = ("sensorState",)
 MOTION_CAPABILITY = "motionDetected"
 
 
+DOOR_OPEN_VALUES = frozenset({"alarm", "open"})  # Altice fixtures use alarm; demo scenarios use open
+DOOR_CLOSED_VALUES = frozenset({"normal", "closed"})
+
+
 def door_is_open(capability: str, value: Any) -> bool | None:
-    """contactSensor `sensorState`: "alarm" = open, "normal" = closed.
-    None when the change is not a door reading."""
-    if capability == "sensorState":
-        return str(value).lower() == "alarm"
+    """contactSensor `sensorState`: "alarm"/"open" = open, "normal"/"closed" = closed.
+    None when the change is not a door reading (or the value is unknown)."""
+    if capability != "sensorState":
+        return None
+    v = str(value).lower()
+    if v in DOOR_OPEN_VALUES:
+        return True
+    if v in DOOR_CLOSED_VALUES:
+        return False
     return None
 
 

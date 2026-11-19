@@ -274,6 +274,17 @@ async def test_manual_override_sets_cooldown(home):
 # --- D14: presence facts and the door timer ----------------------------------------------------
 
 
+def test_door_values_altice_and_demo():
+    from app.agent.tools import door_is_open
+
+    assert door_is_open("sensorState", "alarm") is True  # Altice fixtures
+    assert door_is_open("sensorState", "normal") is False
+    assert door_is_open("sensorState", "open") is True  # demo scenarios
+    assert door_is_open("sensorState", "closed") is False
+    assert door_is_open("sensorState", "weird") is None
+    assert door_is_open("contact", False) is None  # not a fixture name
+
+
 async def test_presence_facts_raw(home):
     services, _ = home
     hall = await services.rooms.create_room(RoomCreate(name="Entrada", isEntrance=True))
