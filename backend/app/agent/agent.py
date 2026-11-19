@@ -62,7 +62,7 @@ Broadcast = Callable[[BaseModel], Awaitable[None]]
 LLM_RETRY_DELAYS: tuple[float, ...] = (2, 5, 15)
 # Hard cap on model round-trips per run (tool calls + final answer). Without it a weak model can
 # loop on tools for minutes (seen: 19 calls / 352 s at startup) while the house waits.
-MAX_MODEL_REQUESTS = 6
+MAX_MODEL_REQUESTS = 4  # legit runs need 1-2 (e.g. routine stats + answer); worst case 4 + 1
 FORCE_ANSWER = (
     "\n\nYou already used all your tool calls for this run. No tools are available now: "
     "decide from the information above and return your decision immediately."
