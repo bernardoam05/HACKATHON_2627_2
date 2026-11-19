@@ -140,6 +140,7 @@ def build_prompt(
     devices: list[Device] | None = None,
     presence: dict[str, Any] | None = None,
     routines: list[dict[str, Any]] | None = None,
+    all_devices: bool = False,
 ) -> str:
     """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract).
 
@@ -194,7 +195,13 @@ def build_prompt(
         sections.append("Routine stats of the plugs (last 14 days, times UTC):\n"
                         + (_json(routines) if routines else "(no plugs)"))
 
-    if r.snapshot is None and by_id:
+    if r.snapshot is None and by_id and all_devices:
+        # Wake-ups (door timer, routine) have no changes but may act on any room.
+        sections.append(
+            "All devices (current state):\n"
+            + _json([_device_line(d) for d in by_id.values() if d.enabled])
+        )
+    elif r.snapshot is None and by_id:
         changed = [by_id[c.deviceId] for c in r.changesSinceLastRun if c.deviceId in by_id]
         rooms = {room_of(d) for d in changed if room_of(d)}
         nearby = [d for d in by_id.values()

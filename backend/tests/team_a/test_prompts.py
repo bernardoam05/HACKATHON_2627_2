@@ -44,3 +44,15 @@ def test_full_prompt_has_no_affected_rooms_section():
     snap = StateSnapshot(id="s", takenAt=NOW, devices=HOUSE)
     prompt = build_prompt(AgentRunInput(mode="full", snapshot=snap, now=NOW), devices=HOUSE)
     assert "Devices in the affected rooms" not in prompt and "Full snapshot" in prompt
+
+
+def test_wake_up_prompt_lists_every_device():
+    """Door timer: no changes, but the agent must see every light to switch the house off."""
+    prompt = build_prompt(
+        AgentRunInput(mode="delta", now=NOW), devices=HOUSE, all_devices=True,
+        wake_reasons=["30s have passed since the last entrance-door event."],
+        presence={"lastDoorEvent": {"deviceId": "door"}, "motionAfterDoorEvent": False},
+    )
+    listed = prompt.split("All devices (current state):\n", 1)[1]
+    assert all(d.id in listed for d in HOUSE)
+    assert "Presence facts" in prompt and "Devices in the affected rooms" not in prompt

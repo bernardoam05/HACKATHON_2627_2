@@ -363,6 +363,7 @@ class HomeAgent:
                 devices=devices,
                 presence=presence,
                 routines=routines,
+                all_devices=bool(wake_reasons),
             )
             if user_message is not None:
                 prompt += (
