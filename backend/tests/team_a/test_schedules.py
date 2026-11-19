@@ -316,6 +316,14 @@ async def test_daily_review_once_per_house_day(agent_home):
     assert await services.agent.maybe_daily_review() is False  # already done today
 
 
+@pytest.mark.parametrize("agent_home", ["2026-11-20T09:00:00"], indirect=True)
+async def test_startup_counts_as_todays_daily_review(agent_home):
+    services, _ = agent_home
+    await services.on_ready()
+    await services.scheduler.wait_idle()
+    assert await services.agent.maybe_daily_review() is False  # no second LLM call today
+
+
 @pytest.mark.parametrize("agent_home", ["2026-11-20T03:10:00"], indirect=True)
 async def test_no_daily_review_before_its_hour(agent_home):
     services, _ = agent_home

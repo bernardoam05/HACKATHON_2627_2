@@ -338,8 +338,12 @@ class HomeAgent:
         return await self._run(DecisionTrigger.state_change)
 
     async def request_startup(self) -> None:
-        """First run after the initial poll: full snapshot and a routine review."""
+        """First run after the initial poll: full snapshot and a routine review (which also counts
+        as today's daily review, so a restart costs one LLM call, not two)."""
         self._startup = True
+        now = self.clock.now()
+        if now.hour >= DAILY_REVIEW_HOUR:
+            await self._repo.kv_set(DAILY_REVIEW_KEY, now.date().isoformat())
         await self.wake("The backend just started. " + ROUTINE_REVIEW)
 
     async def maybe_daily_review(self) -> bool:
