@@ -27,6 +27,9 @@ How you work:
 - Device types may list expectedBehaviours (e.g. "dim the living-room light when the TV turns on
   in the evening"). When the situation matches (check "Now" for the time of day), do it, unless
   the user's feedback or an override says otherwise.
+- Light follows people: when motion starts in a room whose light is off, turn that light on;
+  when a room the person left has no motion any more, turn its light off. Do this for each room
+  independently (another room's light being on is no reason to leave this one off).
 - Propose an action only when it clearly helps. Doing nothing is a valid decision (empty actions).
 - Each action is one capability update on one device: {"deviceId", "update": {"type", "value"},
   "reason"}. Use only capabilities the device has; respect min/max and availableValues.

@@ -65,6 +65,10 @@ LLM_RETRY_DELAYS: tuple[float, ...] = (2, 5, 15)
 # Hard cap on model round-trips per run (tool calls + final answer). Without it a weak model can
 # loop on tools for minutes (seen: 19 calls / 352 s at startup) while the house waits.
 MAX_MODEL_REQUESTS = 4  # legit runs need 1-2 (e.g. routine stats + answer); worst case 4 + 1
+NO_TOOLS_NOTE = (
+    "\n\nThis is a quick reaction run: no tools are available. Everything you need is above "
+    "(changes, devices in the affected rooms, expected behaviours). Decide now."
+)
 FORCE_ANSWER = (
     "\n\nYou already used all your tool calls for this run. No tools are available now: "
     "decide from the information above and return your decision immediately."
@@ -361,11 +365,20 @@ class HomeAgent:
                 self._registry, self._repo, self._plugins, self.clock.now,
                 empty_after_seconds=self._settings.EMPTY_AFTER_MINUTES * 60,
             )
+            # Tools only where they add something: chat, startup, full mode, or a wake-up
+            # (door timer -> presence facts, routine -> stats). Plain deltas: 1 request.
+            use_tools = (
+                trigger != DecisionTrigger.state_change
+                or bool(wake_reasons)
+                or run_input.mode == "full"
+            )
+            if not use_tools:
+                prompt += NO_TOOLS_NOTE
             started = time.monotonic()
-            log.info("agent run started (%s, %s mode, %d changes)",
-                     trigger.value, run_input.mode, len(changes))
+            log.info("agent run started (%s, %s mode, %d changes, tools=%s)",
+                     trigger.value, run_input.mode, len(changes), use_tools)
             try:
-                result = await self._run_llm(prompt, deps)
+                result = await self._run_llm(prompt, deps, use_tools=use_tools)
             except BaseException as e:
                 log.info("agent run failed after %.1fs: %s", time.monotonic() - started,
                          type(e).__name__)
@@ -376,13 +389,20 @@ class HomeAgent:
             self._last_cutoff = cutoff
             return decision
 
-    async def _run_llm(self, prompt: str, deps: AgentDeps) -> Any:
+    async def _run_llm(self, prompt: str, deps: AgentDeps, use_tools: bool = True) -> Any:
         """agent.run with retries on transient provider errors (503 overloaded, 429, network).
         Runs stay serialised meanwhile; changes arriving during the wait set the scheduler's
-        dirty flag and are picked up by the next run (D5)."""
+        dirty flag and are picked up by the next run (D5).
+
+        `use_tools=False` (plain delta runs): the prompt already carries the changes, the
+        devices of the affected rooms and their plugins, so one request decides."""
         attempts = len(self.retry_delays) + 1
         for attempt in range(1, attempts + 1):
             try:
+                if not use_tools:
+                    return await self._final_agent.run(
+                        prompt, usage_limits=UsageLimits(request_limit=2)
+                    )
                 try:
                     return await self._agent.run(
                         prompt, deps=deps,

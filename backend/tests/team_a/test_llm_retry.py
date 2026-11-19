@@ -156,3 +156,26 @@ async def test_tool_loop_is_cut_and_the_agent_still_decides():
     # plugin starterAutomations reach the prompt as expectedBehaviours
     assert "expectedBehaviours" in looper.prompts[0]
     assert "Baixar a luz" in looper.prompts[0]
+
+
+async def test_plain_delta_run_is_one_request_without_tools():
+    looper = ToolLooper()
+    srv = fake_server(sim_devices(), with_sim_tools=True)
+    services = await build_services(
+        Settings(DB_PATH=":memory:", ALTICE_MCP_URL="", SIM_MCP_URL=""),
+        clients={DeviceSource.sim: SimClient(srv)}, model=FunctionModel(looper),
+    )
+    services.scheduler._min_gap = 0
+    try:
+        await services.poller.poll_once(DeviceSource.sim)
+        srv.state["tv1"]["capabilities"][0]["value"] = "on"
+        await services.poller.poll_once(DeviceSource.sim)
+        await services.scheduler.wait_idle()  # 1st run: full mode, tools, capped + forced
+        first = looper.calls
+        srv.state["tv1"]["capabilities"][1]["value"] = 33
+        await services.poller.poll_once(DeviceSource.sim)
+        await services.scheduler.wait_idle()  # 2nd run: plain delta
+        assert looper.calls == first + 1
+        assert "quick reaction run: no tools are available" in looper.prompts[-1]
+    finally:
+        await services.aclose()
