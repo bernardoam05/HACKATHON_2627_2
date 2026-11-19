@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, Field
@@ -176,15 +177,22 @@ class AgentOutput(BaseModel):
 
 
 class Clock:
-    """Real UTC clock, or NOW_OVERRIDE advancing in real time from process start (demos)."""
+    """The house clock: real time in the house's time zone, or NOW_OVERRIDE (house local time)
+    advancing in real time from process start (demos).
 
-    def __init__(self, override: str | None) -> None:
+    Without `tz` (tests, legacy): real UTC, and a naive NOW_OVERRIDE stays naive."""
+
+    def __init__(self, override: str | None, tz: str | None = None) -> None:
+        self.tz = ZoneInfo(tz) if tz else None
         self._start = datetime.now(UTC)
-        self._base = datetime.fromisoformat(override) if override else None
+        base = datetime.fromisoformat(override) if override else None
+        if base is not None and base.tzinfo is None and self.tz is not None:
+            base = base.replace(tzinfo=self.tz)
+        self._base = base
 
     def now(self) -> datetime:
         if self._base is None:
-            return datetime.now(UTC)
+            return datetime.now(self.tz or UTC)
         return self._base + (datetime.now(UTC) - self._start)
 
 
@@ -288,7 +296,7 @@ class HomeAgent:
         self._belief = BeliefStore(
             repo, settings.FULL_SNAPSHOT_EVERY_RUNS, settings.FULL_SNAPSHOT_EVERY_SECONDS
         )
-        self.clock = clock or Clock(settings.NOW_OVERRIDE)
+        self.clock = clock or Clock(settings.NOW_OVERRIDE, settings.TIMEZONE)
         self._model_name = str(model) if model else ",".join(model_names(settings.AGENT_MODEL))
         self._agent: Agent[AgentDeps, AgentOutput] = Agent(
             model or build_model(settings.AGENT_MODEL),
@@ -438,7 +446,9 @@ class HomeAgent:
             routines = []
             for d in devices:
                 if d.enabled and d.type == "plug":
-                    stats = await compute_routine_stats(self._repo, d.id, "instantPower")
+                    stats = await compute_routine_stats(
+                        self._repo, d.id, "instantPower", tz=self.clock.now().tzinfo
+                    )
                     stats.pop("byDay", None)  # the summaries are enough; keeps the prompt small
                     routines.append({"name": d.alias or d.name, **stats})
         return presence, routines

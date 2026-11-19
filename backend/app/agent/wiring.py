@@ -115,7 +115,7 @@ async def build_services(
     onboarding = Onboarding(model or build_model(settings.AGENT_MODEL))
     plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
-    clock = Clock(settings.NOW_OVERRIDE)
+    clock = Clock(settings.NOW_OVERRIDE, settings.TIMEZONE)
     insights = InsightEngine(
         repo, broadcast, settings.INSIGHT_MIN_CONFIDENCE, settings.REFLEX_MAX_UNDOS
     )

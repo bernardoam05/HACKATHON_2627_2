@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     SIM_POLL_SECONDS: float = 2
     ALTICE_POLL_SECONDS: float = 7
     USE_FAKES: bool = False
-    NOW_OVERRIDE: str | None = None  # ISO datetime, fakes the clock for demos
+    NOW_OVERRIDE: str | None = None  # ISO datetime, fakes the clock for demos (house local time)
+    # The house's time zone (IANA): schedules ("07:30"), routines and "Now" are in local time.
+    TIMEZONE: str = "Europe/Lisbon"
     EMPTY_AFTER_MINUTES: float = 10  # 0.5 for demo
     FULL_SNAPSHOT_EVERY_RUNS: int = 20
     FULL_SNAPSHOT_EVERY_SECONDS: int = 900

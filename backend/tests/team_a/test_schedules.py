@@ -275,3 +275,35 @@ async def test_daily_review_once_per_house_day(agent_home):
 async def test_no_daily_review_before_its_hour(agent_home):
     services, _ = agent_home
     assert await services.agent.maybe_daily_review() is False
+
+
+# --- time zone ----------------------------------------------------------------------------------
+
+
+def test_house_clock_is_local_time():
+    from zoneinfo import ZoneInfo
+
+    from app.agent.agent import Clock
+
+    summer = Clock("2026-07-15T07:30:00", "Europe/Lisbon").now()
+    assert summer.utcoffset() == timedelta(hours=1) and summer.hour == 7  # 07:30 local = 06:30 UTC
+    real = Clock(None, "Europe/Lisbon").now()
+    assert real.tzinfo == ZoneInfo("Europe/Lisbon")
+
+
+def test_routine_stats_in_local_time_across_summer_time():
+    from zoneinfo import ZoneInfo
+
+    lisbon = ZoneInfo("Europe/Lisbon")
+    today = datetime(2026, 7, 17, 12, tzinfo=UTC)  # Friday, summer (UTC+1)
+    plug = []
+    for i in range(1, 11):
+        on = (today - timedelta(days=i)).replace(hour=6, minute=30)  # 06:30 UTC = 07:30 local
+        plug += [StateChange(id=f"on{i}", deviceId="p", capability="instantPower", old=2, new=1200,
+                             at=on),
+                 StateChange(id=f"off{i}", deviceId="p", capability="instantPower", old=1200, new=2,
+                             at=on + timedelta(minutes=2))]
+    plug.sort(key=lambda c: c.at)
+    stats = routine_stats(plug, "p", "instantPower", 14, 20, today, tz=lisbon)
+    assert stats["weekdays"]["medianFirstOn"] == "07:30" and stats["timezone"] == "Europe/Lisbon"
+    assert routine_stats(plug, "p", "instantPower", 14, 20, today)["weekdays"]["medianFirstOn"] == "06:30"

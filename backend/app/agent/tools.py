@@ -8,7 +8,7 @@ import asyncio
 import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from pydantic_ai import Agent, ModelRetry, RunContext
@@ -47,8 +47,10 @@ def register_tools(agent: Agent[AgentDeps, Any]) -> None:
     ) -> dict[str, Any]:
         """Daily usage of one capability over the last `days`: per day the first time it became
         active (power on, bool true, or numeric value > threshold, e.g. watts) and for how long,
-        plus weekday/weekend medians and spread. Times are UTC. Use it to find routines."""
-        return await compute_routine_stats(ctx.deps.repo, device_id, capability, days, threshold)
+        plus weekday/weekend medians and spread, and the delay after the first motion of the
+        day. Times are house local time (like Now). Use it to find routines."""
+        return await compute_routine_stats(ctx.deps.repo, device_id, capability, days, threshold,
+                                           tz=ctx.deps.now().tzinfo)
 
     @agent.tool
     async def get_presence_facts(ctx: RunContext[AgentDeps]) -> dict[str, Any]:
@@ -267,14 +269,20 @@ def _offset_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
 
 def routine_stats(
     changes: list[StateChange], device_id: str, capability: str, days: int, threshold: float,
-    today: datetime, motion_changes: list[StateChange] | None = None,
+    today: datetime, motion_changes: list[StateChange] | None = None, tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     """Per day: first activation time, how long it stayed active, the first motion of the day
-    and how many minutes after it the device became active. Times are UTC.
+    and how many minutes after it the device became active. Times and days are in `tz` (the
+    house's time zone; UTC when not given).
 
     Summaries per weekday/weekend group: start times (`medianFirstOn`, spread) and the delay
     after the first motion (`afterFirstMotion`). A small delay spread with a large start spread
     means "N minutes after waking up" rather than "at a fixed time"."""
+    if tz is not None:  # local days and HH:MM (a 07:30 coffee is 07:30 summer and winter)
+        today = today.astimezone(tz)
+        changes = [c.model_copy(update={"at": c.at.astimezone(tz)}) for c in changes]
+        motion_changes = [c.model_copy(update={"at": c.at.astimezone(tz)})
+                          for c in motion_changes or []]
     first_day = (today - timedelta(days=days - 1)).date()
     by_day: dict[Any, dict[str, Any]] = {}
     for i in range(days):
@@ -317,7 +325,7 @@ def routine_stats(
         "deviceId": device_id,
         "capability": capability,
         "threshold": threshold,
-        "timezone": "UTC",
+        "timezone": str(tz) if tz is not None else "UTC",
         "weekdays": {**_summary(weekdays), "afterFirstMotion": _offset_summary(weekdays)},
         "weekends": {**_summary(weekends), "afterFirstMotion": _offset_summary(weekends)},
         "byDay": rows,
@@ -325,10 +333,11 @@ def routine_stats(
 
 
 async def compute_routine_stats(
-    repo: Repository, device_id: str, capability: str, days: int = 14, threshold: float = 20
+    repo: Repository, device_id: str, capability: str, days: int = 14, threshold: float = 20,
+    tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     today = datetime.now(UTC)
-    since = datetime.combine((today - timedelta(days=days)).date(), datetime.min.time(), UTC)
+    since = datetime.combine((today - timedelta(days=days + 1)).date(), datetime.min.time(), UTC)
     changes = await repo.changes_between(since, today, device_id=device_id, capability=capability)
     motion = await repo.changes_between(since, today, capability=MOTION_CAPABILITY)
-    return routine_stats(changes, device_id, capability, days, threshold, today, motion)
+    return routine_stats(changes, device_id, capability, days, threshold, today, motion, tz=tz)

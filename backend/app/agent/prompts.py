@@ -207,7 +207,7 @@ def build_prompt(
                         + _json(presence))
 
     if routines is not None:
-        sections.append("Routine stats of the plugs (last 14 days, times UTC):\n"
+        sections.append("Routine stats of the plugs (last 14 days, house local time like Now):\n"
                         + (_json(routines) if routines else "(no plugs)"))
 
     if r.snapshot is None and by_id and all_devices:
