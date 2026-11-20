@@ -11,6 +11,7 @@ import DeviceList from "./features/manager/DeviceList";
 import PluginConfig from "./features/manager/PluginConfig";
 import RoomEditor from "./features/manager/RoomEditor";
 import { useLive } from "./live/LiveProvider";
+import { hashQuery } from "./lib/devMode";
 import { useTheme } from "./lib/theme";
 import { Badge, Dot, MoonIcon, SunIcon } from "./ui";
 
@@ -23,13 +24,15 @@ const TABS = [
 type Tab = (typeof TABS)[number]["id"];
 
 function tabFromHash(): Tab | null {
-  const hash = location.hash.slice(1);
+  const hash = location.hash.slice(1).split("?")[0]; // "#chat?debug=true" -> "chat"
   return TABS.some((t) => t.id === hash) ? (hash as Tab) : null;
 }
 
+const HASH_QUERY = hashQuery(); // "?debug=true" from "#chat?debug=true", kept across tab changes
+
 export default function App() {
   const [tab, setTab] = useState<Tab>(() => tabFromHash() ?? "chat");
-  useEffect(() => { history.replaceState(null, "", `#${tab}`); }, [tab]);
+  useEffect(() => { history.replaceState(null, "", `#${tab}${HASH_QUERY}`); }, [tab]);
   // Links like <a href="#manager"> (e.g. "Ver bloqueio" in the activity feed) switch tabs.
   useEffect(() => {
     const onHash = () => { const t = tabFromHash(); if (t) setTab(t); };

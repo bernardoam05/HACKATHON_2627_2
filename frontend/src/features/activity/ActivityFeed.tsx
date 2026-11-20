@@ -11,6 +11,7 @@ import { errorMessage, useResource } from "../../lib/useResource";
 import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading } from "../../ui";
 import { cooldownAnchor } from "../cooldowns/CooldownList";
 import { DecisionCard } from "../decisions/DecisionCard";
+import { RunInfoChip } from "../decisions/RunInfoChip";
 
 const LIMIT = 50;
 
@@ -177,11 +178,13 @@ function DecisionEntry({ decision, actions, reflexIds, onResolved }: {
           {n > 0 && <span className="text-xs text-muted">· {plural(n, "ação", "ações")}</span>}
           {actions.some((a) => reflexIds.has(a.id)) && <Badge tone="accent">Reflexo</Badge>}
           <StatusBadges actions={actions} />
+          <RunInfoChip runInfo={decision.runInfo} />
         </div>
       </div>
     }>
       {/* Action records below already list each change (with status/Undo), so the card skips its chips. */}
-      <DecisionCard decision={decision} showExplanation={false} showActions={actions.length === 0} />
+      <DecisionCard decision={decision} showExplanation={false} showActions={actions.length === 0}
+                    showRunInfo={false} />
       {actions.length > 0 && (
         <ul className="m-0 grid list-none gap-1.5 p-0">
           {actions.map((a) => (

@@ -12,6 +12,7 @@ import { useId, useMemo, useState } from "react";
 import type { Decision } from "../../api/types";
 import { ChevronIcon, MicIcon, SendIcon, StopIcon } from "../../ui";
 import { DecisionCard } from "../decisions/DecisionCard";
+import { RunInfoChip } from "../decisions/RunInfoChip";
 import { chatAdapter, decisionOf } from "./chatAdapter";
 import { createDictation, dictationSupported } from "./useVoice";
 
@@ -124,14 +125,18 @@ function DecisionDetails({ decision }: { decision: Decision }) {
   const n = decision.actions.length;
   return (
     <div>
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
-        className="flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-sm text-muted hover:text-ink
-                   focus-visible:outline-2 focus-visible:outline-accent">
-        <ChevronIcon open={open} />
-        Detalhes{n > 0 && ` · ${n} ${n === 1 ? "ação" : "ações"}`}
-      </button>
+      {/* The response time stays visible next to the toggle; the rest is collapsed. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
+          className="flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-sm text-muted hover:text-ink
+                     focus-visible:outline-2 focus-visible:outline-accent">
+          <ChevronIcon open={open} />
+          Detalhes{n > 0 && ` · ${n} ${n === 1 ? "ação" : "ações"}`}
+        </button>
+        <RunInfoChip runInfo={decision.runInfo} />
+      </div>
       <div id={id} hidden={!open} className="mt-1.5">
-        <DecisionCard decision={decision} showTrigger={false} showExplanation={false} />
+        <DecisionCard decision={decision} showTrigger={false} showExplanation={false} showRunInfo={false} />
       </div>
     </div>
   );
