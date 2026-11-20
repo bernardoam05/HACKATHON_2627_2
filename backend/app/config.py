@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Single .env at the repo root (backend/app/config.py -> parents[2]). Real env vars still win.
+ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ROOT_ENV_FILE, extra="ignore")
 
     ALTICE_MCP_URL: str = ""
     # Altice MCP API key (the "cgh_..." key): sent as X-API-Key, NOT as the Bearer token.

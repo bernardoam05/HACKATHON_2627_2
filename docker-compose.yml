@@ -1,0 +1,58 @@
+services:
+  simulator:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    ports:
+      - "${SIMULATOR_PORT:-8100}:8100"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SIM_MCP_URL: http://simulator:8100/mcp
+      DB_PATH: /data/home.db
+    volumes:
+      - backend-data:/data
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      - simulator
+
+  # One-off Altice OAuth login: docker compose run --rm --service-ports altice-login
+  # Open the printed URL in your browser; tokens are stored in the shared backend-data volume.
+  altice-login:
+    profiles: ["login"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SIM_MCP_URL: ""
+      DB_PATH: /data/home.db
+    volumes:
+      - backend-data:/data
+    ports:
+      - "5434:5435"  # host 5434 = redirect URI port -> socat -> listener on container 127.0.0.1:5434
+    command:
+      - sh
+      - -c
+      - socat TCP-LISTEN:5435,fork,reuseaddr TCP:127.0.0.1:5434 & exec python -m app.mcp_clients.auth login
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:

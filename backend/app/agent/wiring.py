@@ -13,7 +13,7 @@ from dotenv import dotenv_values
 
 from app.api.ports import Services
 from app.api.ws import broadcaster
-from app.config import Settings
+from app.config import ROOT_ENV_FILE, Settings
 from app.devices.registry import DeviceRegistry
 from app.devices.rooms import RoomStore
 from app.mcp_clients.altice import AlticeClient
@@ -90,7 +90,7 @@ def export_agent_api_key(settings: Settings) -> str | None:
     for name in expand_spec(settings.AGENT_MODEL_REASONING) + reasoning_names(settings):
         keys.setdefault(_provider(name), reasoning_key)
     exported: list[str] = []
-    dotenv = dotenv_values(".env")  # provider-specific keys written straight in .env
+    dotenv = dotenv_values(ROOT_ENV_FILE)  # provider-specific keys written straight in .env
     for provider in keys:
         var = PROVIDER_KEY_ENV.get(provider)
         if var and dotenv.get(var) and var not in os.environ:

@@ -188,7 +188,7 @@ async def _login() -> int:
 
     settings = get_settings()
     if not settings.ALTICE_MCP_URL:
-        print("ALTICE_MCP_URL is not set in backend/.env")
+        print("ALTICE_MCP_URL is not set in the root .env")
         return 2
     repo = await _with_repo(settings)
     client = AlticeClient(
