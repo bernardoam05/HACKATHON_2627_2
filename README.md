@@ -1,6 +1,6 @@
 # Smart Home Agent
 
-# Group: GIGABytes
+Group: GIGABytes
 
 The intelligence layer of a smart home. It reasons on every device state change and adapts the
 house, choosing per capability whether to execute, notify or suggest.
