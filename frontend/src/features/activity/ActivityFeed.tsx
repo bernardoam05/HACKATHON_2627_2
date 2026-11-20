@@ -8,7 +8,7 @@ import { describeUpdate, useDeviceLabel } from "../../live/DevicesProvider";
 import { useLiveMessages } from "../../live/LiveProvider";
 import { formatClock, timeAgo, useNow } from "../../lib/time";
 import { errorMessage, useResource } from "../../lib/useResource";
-import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading } from "../../ui";
+import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading, RefreshIcon } from "../../ui";
 import { cooldownAnchor } from "../cooldowns/CooldownList";
 import { DecisionCard } from "../decisions/DecisionCard";
 
@@ -93,7 +93,7 @@ export default function ActivityFeed() {
         </Card>
       )}
 
-      <Card title="Atividade" actions={<Button variant="ghost" onClick={reload}>Atualizar</Button>}>
+      <Card title="Atividade" actions={<Button variant="ghost" onClick={reload} aria-label="Atualizar" title="Atualizar"><RefreshIcon className="size-4" /></Button>}>
         {error && <div className="mb-3"><ErrorNote message={error} onRetry={reload} /></div>}
         {loading ? <Loading /> : items.length === 0 ? (
           <Empty>Ainda não aconteceu nada. Quando a casa reagir a alguma coisa, aparece aqui.</Empty>
