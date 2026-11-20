@@ -13,6 +13,7 @@ dependencies = [
     "aiosqlite",
     "pyyaml",
     "httpx",
+    "tzdata",
 ]
 
 [dependency-groups]
