@@ -225,7 +225,9 @@ function EditDevice({ device }: { device: Device }) {
           <input className={inputClass} value={alias} placeholder={device.name}
                  onChange={(e) => { setAlias(e.target.value); setSaved(false); }} />
         </Field>
-        <Field label="Divisão" hint={device.roomName ? `Na app Altice: ${device.roomName}` : undefined}>
+        <Field label="Divisão" hint={device.roomName
+          ? `${device.source === "sim" ? "No simulador" : "Na app Altice"}: ${device.roomName}`
+          : undefined}>
           <select className={inputClass} value={roomId}
                   onChange={(e) => { setRoomId(e.target.value); setSaved(false); }}>
             <option value="">Sem divisão</option>

@@ -241,3 +241,26 @@ async def test_poller_failing_source_does_not_raise(world):
     poller._registry._clients[DeviceSource.altice]._connect_timeout = 0.5
     assert await poller.poll_once(DeviceSource.altice) == []
     await poller._registry._clients[DeviceSource.altice].close()
+
+
+async def test_new_devices_go_into_rooms_named_by_their_source(world):
+    """Sim devices report a room name: they land in our room of that name (created once, the
+    entrance marked), and a later "Sem divisão" chosen by the user is kept."""
+    srv = world["sim_srv"]
+    srv.state["tv1"]["roomName"] = "Sala"
+    srv.state["lamp1"]["roomName"] = "sala "
+    srv.state["door"] = {"id": "door", "name": "Porta", "type": "contactSensor",
+                         "roomName": "Entrada", "capabilities": [{"type": "sensorState",
+                                                                  "value": "normal"}]}
+    reg: DeviceRegistry = world["registry"]
+    devices = {d.id: d for d in await reg.read_state()}
+    rooms = {r.name: r for r in await world["rooms"].list_rooms()}
+    assert set(rooms) == {"Sala", "Entrada", "Hack 5"}  # Hack 5: the Altice app's room
+    assert rooms["Entrada"].isEntrance and not rooms["Sala"].isEntrance
+    assert devices["tv1"].roomId == devices["lamp1"].roomId == rooms["Sala"].id
+    assert devices["door"].roomId == rooms["Entrada"].id
+
+    await reg.assign("tv1", DeviceAssignment(roomId=None))  # user: "Sem divisão"
+    await reg.read_state()
+    assert (await reg.get_device("tv1")).roomId is None
+    assert len(await world["rooms"].list_rooms()) == 3
