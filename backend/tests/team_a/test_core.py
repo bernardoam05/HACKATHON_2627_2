@@ -276,3 +276,27 @@ async def test_rooms_crud_unassigns_devices(repo: Repository):
     await rooms.delete_room(hall.id)
     assert await rooms.list_rooms() == []
     assert (await repo.get_overrides())["b1"] == {"alias": "Luz", "roomId": None, "enabled": None}
+
+
+async def test_concurrent_proposals_share_one_llm_call(repo: Repository):
+    """The config dialog may ask twice at once (React StrictMode): one LLM request, not two."""
+    import asyncio
+
+    from app.agent.onboarding import finalize, heuristic_draft
+
+    devices = [Device(id="lock", type="fechaduraInteligente", name="Fechadura",
+                      source=DeviceSource.sim)]
+    calls = 0
+
+    async def proposer(device: Device):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return finalize(device, heuristic_draft(device))
+
+    reg = PluginRegistry(repo, devices=lambda: _async(devices), proposer=proposer)
+    a, b = await asyncio.gather(reg.propose("fechaduraInteligente"),
+                                reg.propose("fechaduraInteligente"))
+    assert calls == 1 and a.plugin.type == b.plugin.type == "fechaduraInteligente"
+    await reg.propose("fechaduraInteligente")  # a later request (e.g. "propose again") is new
+    assert calls == 2

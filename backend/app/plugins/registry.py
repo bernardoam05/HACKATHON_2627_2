@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from app.schemas import (
@@ -63,6 +64,7 @@ class PluginRegistry:
         self._repo = repo
         self._devices = devices
         self._proposer = proposer
+        self._proposing: dict[str, asyncio.Task[PluginProposal]] = {}
         self._builtin = {p.type: p for p in load_builtin_plugins()}
 
     # --- lookup -----------------------------------------------------------------------------
@@ -103,6 +105,17 @@ class PluginRegistry:
     async def propose(self, type: str) -> PluginProposal:
         if self._proposer is None or self._devices is None:
             raise NotImplementedError("Plugin onboarding (agent/onboarding.py) is not wired yet")
+        # Concurrent requests for the same type (a dialog opened twice, React StrictMode) share
+        # one LLM call instead of each spending a request.
+        task = self._proposing.get(type)
+        if task is None:
+            task = asyncio.ensure_future(self._propose(type))
+            self._proposing[type] = task
+            task.add_done_callback(lambda _t: self._proposing.pop(type, None))
+        return await asyncio.shield(task)
+
+    async def _propose(self, type: str) -> PluginProposal:
+        assert self._proposer is not None and self._devices is not None
         device = next((d for d in await self._devices() if d.type == type), None)
         if device is None:
             raise KeyError(type)

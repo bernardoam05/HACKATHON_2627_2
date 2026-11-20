@@ -54,6 +54,7 @@ class DeviceRegistry:
     async def read_source(self, source: DeviceSource) -> list[Device]:
         """Fetch a source, apply overrides, refresh the cache. Raises if the source is down."""
         devices = await self._clients[source].list_devices()
+        await self._place_new_devices(devices)
         devices = await self._apply_overrides(devices)
         self._cache[source] = devices
         return devices
@@ -82,6 +83,18 @@ class DeviceRegistry:
             if d.id == device_id:
                 return d
         raise KeyError(device_id)
+
+    async def _place_new_devices(self, devices: list[Device]) -> None:
+        """A device the user never configured that reports a room (the simulator does) goes into
+        our room of that name, created if missing. Only once: afterwards it has an override row,
+        so the user's choices (another room, "Sem divisão") are kept."""
+        overrides = await self._repo.get_overrides()
+        for d in devices:
+            if d.id in overrides or not (d.roomName or "").strip():
+                continue
+            room = await self._rooms.ensure_room(d.roomName or "")
+            await self._repo.set_override(d.id, roomId=room.id)
+            log.info("device %s placed in room %s (from its source)", d.id, room.name)
 
     async def _apply_overrides(self, devices: list[Device]) -> list[Device]:
         overrides = await self._repo.get_overrides()

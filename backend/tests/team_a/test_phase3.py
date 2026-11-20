@@ -13,7 +13,6 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     ToolCallPart,
-    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -111,7 +110,10 @@ async def test_wake_scheduler_resolve_and_fire():
     clock = Clock("2026-11-20T07:20:00")  # naive house time, as in NOW_OVERRIDE
     ws = WakeScheduler(clock, wake)
     assert ws.resolve("07:25") == datetime(2026, 11, 20, 7, 25)
-    assert ws.resolve("07:00") == datetime(2026, 11, 21, 7, 0)  # already passed -> tomorrow
+    assert ws.resolve("07:00") == datetime(2026, 11, 21, 7, 0)  # 20 min ago -> tomorrow
+    just_now = ws.resolve("07:15")  # 5 min ago: the agent was late -> now, not tomorrow
+    assert just_now is not None and just_now.date() == datetime(2026, 11, 20).date()
+    assert abs((just_now - clock.now()).total_seconds()) < 2
     assert ws.resolve("bogus") is None
     assert ws.schedule("2026-11-25T07:00:00", "too far") is None
 
@@ -138,25 +140,15 @@ def _user_prompt(messages: list[ModelMessage]) -> str:
     return ""
 
 
-def _tool_return(messages: list[ModelMessage]) -> Any:
-    for m in messages:
-        if isinstance(m, ModelRequest):
-            for p in m.parts:
-                if isinstance(p, ToolReturnPart) and p.tool_name == "get_routine_stats":
-                    return p.content
-    return None
-
-
 def scripted(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
     prompt = _user_prompt(messages)
     final = info.output_tools[0].name
     out: dict[str, Any] = {"explanation": "Nada a fazer.", "beliefState": "b", "actions": []}
     if "The backend just started" in prompt:
-        stats = _tool_return(messages)
-        if stats is None:
-            return ModelResponse(parts=[ToolCallPart(
-                "get_routine_stats", {"device_id": "coffee", "capability": "instantPower"})])
-        SEEN["stats"] = stats
+        # Routine stats are inlined in the startup prompt (no tool round-trip).
+        assert not info.function_tools
+        line = re.search(r"Routine stats of the plugs \([^)]*\):\n(.+)", prompt).group(1)
+        SEEN["stats"] = json.loads(line)[0]
         now = datetime.fromisoformat(re.search(r"Now \(house local time\): (\S+)", prompt).group(1))
         out = {
             "explanation": "Aprendi que costumas fazer café por volta das 07:30 nos dias úteis.",

@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
 You configure a smart-home device type the house has never seen. From one example device
-(type, name, categories and capabilities with current values, ranges and allowed values) propose:
+(type, name, categories and capabilities with current values, ranges and allowed values) propose
+the following. The device's own name and type say what it is ("fechadura" = a lock): base
+displayName, purpose and ideas on them and on its capabilities, never on other devices.
 - displayName: short name in European Portuguese (PT-PT), e.g. "Sensor de movimento".
 - purpose: comfort | entertainment | energy | security | environment.
 - capabilities: one entry per capability of the device, with a short PT-PT description,
@@ -125,7 +127,7 @@ class Onboarding:
     def __init__(self, model: Model | str, retries: int = 2) -> None:
         self._agent: Agent[None, PluginDraft] = Agent(
             model, output_type=PluginDraft, instructions=INSTRUCTIONS,
-            defer_model_check=True, retries=retries,
+            defer_model_check=True, retries=retries, model_settings={"timeout": 25},
         )
 
     async def propose(self, device: Device) -> PluginProposal:

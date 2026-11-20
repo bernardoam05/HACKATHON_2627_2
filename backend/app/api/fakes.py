@@ -29,6 +29,7 @@ from app.schemas import (
     PluginStatus,
     ProposedAction,
     Reflex,
+    ReflexCreate,
     ReflexStatus,
     Room,
     RoomCreate,
@@ -205,6 +206,16 @@ class FakeBackend:
 
     async def list_reflexes(self, status: str | None) -> list[Reflex]:
         return [r for r in self._reflexes.values() if status in (None, r.status.value)]
+
+    async def create_reflex(self, body: ReflexCreate) -> Reflex:
+        for a in body.actions:
+            if a.deviceId not in self._devices:
+                raise KeyError(a.deviceId)
+        r = Reflex(id=f"rfx-{uuid.uuid4().hex[:6]}", name=body.name, triggers=body.triggers,
+                   triggerLogic=body.triggerLogic, actions=body.actions,
+                   status=ReflexStatus.active, createdAt=_now())
+        self._reflexes[r.id] = r
+        return r
 
     async def _set_reflex(self, reflex_id: str, status: ReflexStatus) -> Reflex:
         r = self._reflexes[reflex_id]

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -24,7 +25,14 @@ from app.schemas import AgentStatusMsg, DeviceSource
 from app.storage.db import init_db
 from app.storage.repository import Repository
 
-from .agent import Clock, HomeAgent
+from .agent import (
+    Clock,
+    HomeAgent,
+    build_model,
+    expand_spec,
+    model_names,
+    reasoning_names,
+)
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
@@ -33,6 +41,22 @@ from .reflexes import ReflexEngine
 from .tools import PresenceWatcher
 
 log = logging.getLogger(__name__)
+
+CLOCK_SECONDS = 30  # scheduled reflexes are checked this often (they have a 15 min catch-up)
+
+
+def _configure_app_logging() -> None:
+    """uvicorn only configures its own loggers: show the app's INFO lines (agent runs, polls)
+    on stderr, once, unless someone already attached a handler."""
+    app_log = logging.getLogger("app")
+    if app_log.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s",
+                                           "%H:%M:%S"))
+    app_log.addHandler(handler)
+    app_log.setLevel(logging.INFO)
+    app_log.propagate = False
 
 
 # Provider prefix of AGENT_MODEL ("anthropic:claude-...") -> the env var its SDK reads.
@@ -49,30 +73,47 @@ PROVIDER_KEY_ENV = {
 }
 
 
+def _provider(name: str) -> str:
+    return name.split(":", 1)[0] if ":" in name else ""
+
+
 def export_agent_api_key(settings: Settings) -> str | None:
-    """Make AGENT_API_KEY visible to the provider SDK. A variable already set in the real
-    environment wins. Returns the env var name used (None if nothing to do)."""
-    if not settings.AGENT_API_KEY:
-        return None
-    provider = settings.AGENT_MODEL.split(":", 1)[0] if ":" in settings.AGENT_MODEL else ""
-    var = PROVIDER_KEY_ENV.get(provider)
-    if var is None:
-        log.warning("AGENT_API_KEY set but provider %r is unknown; export its key yourself",
-                    provider)
-        return None
-    os.environ.setdefault(var, settings.AGENT_API_KEY)
-    return var
+    """Make the keys visible to the provider SDKs: AGENT_API_KEY for the providers of AGENT_MODEL,
+    AGENT_REASONING_API_KEY (or AGENT_API_KEY) for the other providers of the reasoning chain
+    (e.g. Gemini fast + OpenAI reasoning). A variable already set in the real environment wins.
+    Returns the env var names used, comma-separated (None if nothing to do)."""
+    fast = {_provider(n) for n in model_names(settings.AGENT_MODEL)}
+    keys: dict[str, str] = {p: settings.AGENT_API_KEY for p in fast}
+    reasoning_key = settings.AGENT_REASONING_API_KEY or settings.AGENT_API_KEY
+    for name in expand_spec(settings.AGENT_MODEL_REASONING) + reasoning_names(settings):
+        keys.setdefault(_provider(name), reasoning_key)
+    exported: list[str] = []
+    for provider, key in keys.items():
+        if not key:
+            continue
+        var = PROVIDER_KEY_ENV.get(provider)
+        if var is None:
+            log.warning("an API key is set but provider %r is unknown; export its key yourself",
+                        provider)
+            continue
+        os.environ.setdefault(var, key)
+        if var not in exported:
+            exported.append(var)
+    return ",".join(exported) or None
 
 
 async def build_services(
     settings: Settings,
     clients: dict[DeviceSource, McpClient] | None = None,
     model: Any = None,
+    reasoning_model: Any = None,
 ) -> Services:
-    """Real services. `clients`/`model` are injectable for tests.
+    """Real services. `clients`/`model`/`reasoning_model` are injectable for tests (`model`
+    alone serves both tiers).
 
     Extra attributes on the returned container: `poller`, `scheduler`, `repo`, `aclose()`.
     """
+    _configure_app_logging()
     export_agent_api_key(settings)
     repo = Repository(await init_db(settings.DB_PATH))
     if clients is None:
@@ -89,10 +130,10 @@ async def build_services(
 
     rooms = RoomStore(repo)
     registry = DeviceRegistry(repo, rooms, clients)
-    onboarding = Onboarding(model or settings.AGENT_MODEL)
+    onboarding = Onboarding(reasoning_model or model or build_model(reasoning_names(settings)))
     plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
-    clock = Clock(settings.NOW_OVERRIDE)
+    clock = Clock(settings.NOW_OVERRIDE, settings.TIMEZONE)
     insights = InsightEngine(
         repo, broadcast, settings.INSIGHT_MIN_CONFIDENCE, settings.REFLEX_MAX_UNDOS
     )
@@ -111,6 +152,7 @@ async def build_services(
     agent = HomeAgent(
         settings, registry, repo, plugins, rooms, executor, broadcast,
         insights=insights, reflexes=reflexes, feedback=feedback, clock=clock, model=model,
+        reasoning_model=reasoning_model,
     )
     presence = PresenceWatcher(registry, repo, settings.EMPTY_AFTER_MINUTES * 60, agent.wake)
 
@@ -122,6 +164,18 @@ async def build_services(
 
     scheduler = LatestWinsScheduler(run_agent, on_status)
     agent.scheduler = scheduler
+    reflexes.ask_agent = agent.wake  # `askAgent` schedules let the agent decide at the due time
+
+    async def clock() -> None:
+        """Scheduled reflexes (no LLM) and the once-a-day routine review."""
+        while True:
+            try:
+                await reflexes.tick()
+                await agent.maybe_daily_review()
+            except Exception:
+                log.exception("clock tick failed")
+            await asyncio.sleep(CLOCK_SECONDS)
+
     poller = Poller(
         registry,
         repo,
@@ -133,6 +187,7 @@ async def build_services(
         },
         hooks=[feedback, reflexes, presence],  # order matters: overrides before reflexes
         plugins=plugins,
+        background=[clock],
     )
 
     services = Services(

@@ -13,6 +13,7 @@ from .agent import (
     PresenceFacts,
     ProposedAction,
     Reflex,
+    ReflexCreate,
     ReflexProposal,
     ReflexStatus,
     ReflexTrigger,

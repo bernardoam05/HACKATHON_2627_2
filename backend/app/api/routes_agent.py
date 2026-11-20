@@ -15,6 +15,7 @@ from app.schemas import (
     DeviceCooldown,
     Insight,
     Reflex,
+    ReflexCreate,
     StateChange,
 )
 
@@ -103,6 +104,13 @@ async def delete_insight(insight_id: str, s: Services = Depends(get_services)):
 @router.get("/reflexes", response_model=list[Reflex])
 async def reflexes(status: str | None = None, s: Services = Depends(get_services)):
     return await s.agent.list_reflexes(status)
+
+
+@router.post("/reflexes", response_model=Reflex)
+async def create_reflex(body: ReflexCreate, s: Services = Depends(get_services)):
+    """User-created schedule/automation (e.g. "07:30 on weekdays -> bedroom light on"): active
+    at once, runs without the LLM; actions needing confirmation are refused (409)."""
+    return await s.agent.create_reflex(body)
 
 
 @router.post("/reflexes/{reflex_id}/confirm", response_model=Reflex)

@@ -57,7 +57,11 @@ class Poller:
         intervals: dict[DeviceSource, float],
         hooks: list[ChangeHook] | None = None,
         plugins: PluginLookup | None = None,
+        background: list[Callable[[], Awaitable[None]]] | None = None,
     ) -> None:
+        """`background`: long-running coroutines started with the poll loops (e.g. the reflex
+        clock), so they live and die with the poller task."""
+        self._background = list(background or [])
         self._registry = registry
         self._repo = repo
         self._scheduler = scheduler
@@ -134,7 +138,10 @@ class Poller:
                 await on_ready()
             except Exception:
                 log.exception("poller on_ready failed")
-        await asyncio.gather(*(self._loop(s) for s in self._registry.sources))
+        await asyncio.gather(
+            *(self._loop(s) for s in self._registry.sources),
+            *(task() for task in self._background),
+        )
 
 
 _EMPTY = StateSnapshot(id="", takenAt=datetime.min.replace(tzinfo=UTC), devices=[])

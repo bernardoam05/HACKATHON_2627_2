@@ -1,11 +1,12 @@
 """Agent contracts. (Shared contract)"""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .device import CapabilityUpdate, Room
 from .events import ActionRecord, StateChange, StateSnapshot, UserFeedback
@@ -49,13 +50,36 @@ class TimeWindow(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
 class ReflexTrigger(BaseModel):
-    deviceId: str
-    capability: str
-    operator: Literal["=", "<", ">", "changed"]
+    """`state`: a device change (deviceId + capability + operator/value).
+    `time`: every day at `at` (house time, HH:MM), optionally only on `weekdays` (0 = Monday).
+    `first_motion`: `delayMinutes` after the first motion of the day, optionally on `weekdays`.
+    In an `all` reflex, `state` triggers next to a time trigger act as conditions on the
+    current state (e.g. "07:30, only if the bedroom light is off")."""
+
+    kind: Literal["state", "time", "first_motion"] = "state"
+    deviceId: str = ""  # "" for time/first_motion triggers (kept a string for old clients)
+    capability: str = ""
+    operator: Literal["=", "<", ">", "changed"] = "="
     value: float | str | bool | None = None
     roomId: str | None = None
     timeWindow: TimeWindow | None = None
+    at: str | None = Field(default=None, description="HH:MM, house time (kind=time)")
+    weekdays: list[int] | None = Field(default=None, description="0 = Monday (time/first_motion)")
+    delayMinutes: float | None = Field(default=None, ge=0, le=720, description="kind=first_motion")
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> ReflexTrigger:
+        if self.kind == "state" and (not self.deviceId or not self.capability):
+            raise ValueError("a state trigger needs deviceId and capability")
+        if self.kind == "time" and not (self.at and _HHMM.match(self.at)):
+            raise ValueError("a time trigger needs `at` as HH:MM")
+        if self.weekdays is not None and any(d not in range(7) for d in self.weekdays):
+            raise ValueError("weekdays are 0 (Monday) .. 6 (Sunday)")
+        return self
 
 
 class ReflexStatus(str, Enum):
@@ -76,6 +100,23 @@ class Reflex(BaseModel):
     createdAt: datetime
     executions: int = 0
     undos: int = 0
+    lastFiredAt: datetime | None = None  # scheduled reflexes fire at most once per house day
+    # Scheduled reflexes only: at the due time, wake the agent to decide whether the actions
+    # still make sense (is anyone home?) instead of running them blindly (costs one LLM call).
+    askAgent: bool = False
+    # "user": created by the user (POST /api/reflexes); the agent may only pause it.
+    createdBy: Literal["agent", "user"] = "agent"
+
+
+class ReflexCreate(BaseModel):
+    """A schedule/automation created by the user (POST /api/reflexes): active at once.
+    Its actions may never need confirmation (D16): `suggest` capabilities are refused (409)."""
+
+    name: str
+    triggers: list[ReflexTrigger] = Field(min_length=1)
+    triggerLogic: Literal["all", "any"] = "all"
+    actions: list[ProposedAction] = Field(min_length=1)
+    askAgent: bool = False
 
 
 class ReflexProposal(BaseModel):

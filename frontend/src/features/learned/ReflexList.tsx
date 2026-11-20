@@ -6,8 +6,10 @@ import type { Reflex, ReflexStatus, ReflexTrigger } from "../../api/types";
 import { SAMPLE_MODE, sampleReflexes } from "../../dev/samples";
 import { describeUpdate, formatValue, useDeviceLabel } from "../../live/DevicesProvider";
 import { useLiveMessages } from "../../live/LiveProvider";
+import { timeAgo } from "../../lib/time";
 import { errorMessage, useResource } from "../../lib/useResource";
 import { Badge, Button, Card, Empty, ErrorNote, Expandable, Loading } from "../../ui";
+import ScheduleForm from "./ScheduleForm";
 
 const STATUS: Record<ReflexStatus, { label: string; tone: "good" | "warn" | "neutral" }> = {
   proposed: { label: "Proposto", tone: "warn" },
@@ -49,11 +51,13 @@ export default function ReflexList() {
   return (
     <Card title="Reflexos">
       <p className="m-0 mb-3 text-sm text-muted">
-        Ações que a casa faz sozinha, de imediato, depois de as aprovares.
+        Ações que a casa faz sozinha, de imediato, depois de as aprovares. Os agendamentos correm à hora
+        marcada (ou depois de acordares), todos os dias.
       </p>
+      <ScheduleForm onCreated={update} />
       {reflexes.error ? <ErrorNote message={reflexes.error} onRetry={reflexes.reload} />
         : !reflexes.data ? <Loading />
-        : all.length === 0 ? <Empty>Ainda não há reflexos. A casa propõe um quando tiver confiança num padrão.</Empty>
+        : all.length === 0 ? <Empty>Ainda não há reflexos. Cria um agendamento ou espera que a casa proponha um quando tiver confiança num padrão.</Empty>
         : (
           <div className="grid gap-2">
             {proposed.map((r) => <ProposedReflex key={r.id} reflex={r} onUpdate={update} />)}
@@ -119,13 +123,20 @@ function ReflexItem({ reflex, onUpdate }: { reflex: Reflex; onUpdate: (r: Reflex
     <Expandable summary={
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium">{reflex.name}</span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-muted">{reflex.executions}× usado</span>
+          {reflex.createdBy === "user" && <Badge tone="accent">Criado por ti</Badge>}
           <Badge tone={status.tone}>{status.label}</Badge>
         </div>
       </div>
     }>
       <ReflexRule reflex={reflex} />
+      {reflex.askAgent && (
+        <p className="m-0 text-sm text-muted">À hora marcada, a casa pergunta-se primeiro se faz sentido (por exemplo, se há alguém em casa).</p>
+      )}
+      {reflex.lastFiredAt && (
+        <p className="m-0 text-xs text-muted">Última vez: {timeAgo(reflex.lastFiredAt)}.</p>
+      )}
       {reflex.undos > 0 && (
         <p className="m-0 text-sm text-muted">
           Desfeito {reflex.undos} {reflex.undos === 1 ? "vez" : "vezes"}. Se continuares a desfazer, a casa põe-no em pausa.
@@ -166,7 +177,21 @@ function ReflexRule({ reflex }: { reflex: Reflex }) {
   );
 }
 
+function describeDays(weekdays: number[] | null | undefined): string {
+  if (!weekdays?.length) return "";
+  const days = [...weekdays].sort((a, b) => a - b);
+  if (days.join() === "0,1,2,3,4") return " (dias úteis)";
+  if (days.join() === "5,6") return " (fim de semana)";
+  return ` (${days.map((d) => WEEKDAYS[d] ?? d).join(", ")})`;
+}
+
 function describeTrigger(t: ReflexTrigger, label: (id: string) => string): string {
+  if (t.kind === "time") return `são ${t.at ?? "—"}${describeDays(t.weekdays)}`;
+  if (t.kind === "first_motion") {
+    const delay = t.delayMinutes ?? 0;
+    const when = delay > 0 ? `passam ${delay} min desde que acordaste` : "acordas";
+    return `${when} (primeiro movimento do dia)${describeDays(t.weekdays)}`;
+  }
   const cap = CAPABILITY[t.capability] ?? t.capability;
   let text = t.operator === "changed"
     ? `${label(t.deviceId)}: ${cap} muda`

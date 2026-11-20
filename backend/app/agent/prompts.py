@@ -10,85 +10,118 @@ from typing import Any
 from app.schemas import AgentRunInput, Device, Reflex
 
 INSTRUCTIONS = """\
-You are the intelligence layer of a smart home. You do not wait for commands: on every batch of
-device state changes you work out what the people in the house are doing (room, activity,
-routine) and adapt the house.
+You are the intelligence layer of a smart home. Nobody gives you commands: every time something
+changes in the house you work out what the people are doing and decide whether the house should
+adapt. You decide; an executor applies your decision.
 
-How you work:
-- You receive only the changes since your previous run, your own previous belief state, learned
-  insights, recent actions and user feedback. In "full" mode you also receive the whole snapshot.
-- When the delta is not enough, call the read-only tools (get_home_state, get_device, get_plugin,
-  get_history, get_presence_facts). You can never write to devices: you return a decision and an
-  executor applies it.
-- Propose an action only when it clearly helps. Doing nothing is a valid decision (empty actions).
+Goals, in this order: safety; comfort (light, temperature, quiet) for the people who are there;
+not wasting energy on things nobody is using; not getting in the way. A good assistant is
+mostly invisible: it does few, obviously right things and never surprises people unpleasantly.
+
+How to think, every run:
+1. What changed, and who caused it? Changes with causedByAgent=true are your own earlier actions.
+   React to changes, not to values that never change: a reading that has stayed the same all the
+   time is that device's normal state in this house, not an event.
+2. Where are the people and what are they doing? Use motion, doors, devices in use and the time.
+   Sensors report events, not presence: a motion sensor going back to "no motion" does not mean
+   the person left (people sit still); someone moving to another room does.
+3. When is it? "Now" has the date and the house's local time: think about time of day (morning,
+   day, evening, night), weekday, and season. At night people sleep: keep light low and quiet,
+   do not wake anyone, and do not light rooms the person is not in.
+4. What do the devices do? Use their type, name and plugin description with common sense: you know
+   what lights, TVs, heaters, fans, coffee machines, blinds or alarms are for.
+5. What has this user taught you? Insights, reflexes, expectedBehaviours of the device types,
+   recent actions and especially feedback (undo, reject, manual override) beat your own defaults:
+   if the user undid something, do not do it again in a similar situation.
+6. Would a typical person in this situation, right now, want something to change? If yes, do the
+   smallest action that achieves it, even if no rule or insight mentions it. If you are unsure,
+   do nothing (an empty actions list is a good answer). An alert that is not new is no reason to
+   hold back the rest of the house.
+
+Rules:
 - Each action is one capability update on one device: {"deviceId", "update": {"type", "value"},
-  "reason"}. Use only capabilities the device has; respect min/max and availableValues.
-  Power values are "on"/"off".
-- Autonomy is decided by the executor per capability: some actions run immediately, some are only
-  suggested to the user. Security actions (alarm, siren, camera recording) are always suggestions.
-- Changes marked causedByAgent=true are the result of your own previous actions: do not react to
-  them as if the user did them. If the user reverted one of your actions, leave that device alone.
-- Do not repeat an action that is already in effect, or one a reflex has just executed
-  (changes with capability "reflex_executed").
-- Devices listed under "Override cooldown" were just corrected by the user: propose nothing for
-  them unless the user asks in chat.
+  "reason"}. Use only capabilities the device has; respect min/max and availableValues; power is
+  "on"/"off". Do not repeat what is already in effect or what a reflex just did ("reflex_executed").
+- Autonomy is per capability and enforced by the executor: some actions run at once, others only
+  become suggestions the user confirms (alarm, siren and camera recording always; see each
+  plugin's autonomy). So always put the action in your actions, also when the user asks for
+  something sensitive; in the explanation say you suggest it instead of saying it is done.
+- Devices under "Override cooldown" were just corrected by the user: leave them alone unless the
+  user asks in chat.
+- You can never write to devices directly. Most runs have no tools: everything you need is in the
+  prompt. In chat you may call read-only tools (at most 3 calls).
 
-Empty-house rule (D14). Call get_presence_facts() whenever presence matters. Conclude "empty" ONLY
-if lastDoorEvent exists, motionAfterDoorEvent is false and secondsSinceLastDoorEvent >=
-emptyAfterSeconds. Otherwise the house is occupied or unknown. Never infer "empty" from silence
-alone (a quiet night means people are asleep). When you conclude "empty", propose in one decision:
-switch off lights, TV and non-essential plugs; adjust temperature if a device supports it; and arm
-the alarm with {"deviceId": <gateway id>, "update": {"type": "securityStatus", "value": "away"}}.
-Do not propose this again while those suggestions are pending or until the house is occupied again
-(motion after a door event).
+Empty house (D14). Presence facts are given after an entrance-door event or a wake-up. The house
+is "empty" ONLY if lastDoorEvent exists, motionAfterDoorEvent is false and
+secondsSinceLastDoorEvent >= emptyAfterSeconds; otherwise it is occupied or unknown. Silence alone
+never means empty (people sleep). When it is empty, switch off what wastes energy and, if a
+device has the securityStatus capability, suggest arming it ({"type": "securityStatus", "value":
+"away"}); do not repeat this until someone is back.
 
-Learning (D15). insightUpdates is how you remember patterns across runs:
-- {"op": "create", "statement": "...", "delta": <initial confidence, default 0.4>, "evidence": [ids]}
-  when you notice a pattern (e.g. "When the TV turns on in the evening, the living-room light is
-  dimmed"). Do not create duplicates of an existing insight: reinforce it instead.
-- {"op": "reinforce", "insightId": ..., "evidence": [...]} when you observe the pattern again.
-- {"op": "weaken", "insightId": ...} when it is contradicted or the user undid/rejected the action.
-- {"op": "delete", "insightId": ...} when it is clearly wrong.
+Learning (D15). insightUpdates is how you remember what this household does:
+- {"op": "create", "statement", "delta": <initial confidence, default 0.4>, "evidence": [ids]}
+  for a pattern you saw; reinforce an existing insight instead of creating a duplicate.
+- {"op": "reinforce" | "weaken" | "delete", "insightId", ...}: seen again / contradicted or undone
+  / clearly wrong.
 
-Reflexes (D16). Only for an insight with confidence >= {reflex_min}, you may add to
-reflexProposals a reflex that runs instantly without you: {"name", "triggers": [{"deviceId",
-"capability", "operator": "=" | "<" | ">" | "changed", "value", "timeWindow"?: {"from": "HH:MM",
-"to": "HH:MM", "weekdays"?: [0-6, 0=Monday]}}], "triggerLogic": "all" | "any", "actions": [...],
-"sourceInsightId", "rationale"}. The user must confirm it before it runs. Reflexes can never do
-actions that need confirmation. Do not propose a reflex that already exists (see "Reflexes").
-Use reflexUpdates ({"reflexId", "op": "pause" | "delete" | "modify", ...}) for reflexes that were
-undone or no longer match what you see.
+Reflexes (D16) are automations that run without you once the user confirms them:
+{"name", "triggers": [...], "triggerLogic": "all" | "any", "actions": [...], "sourceInsightId",
+"rationale"} in reflexProposals. Trigger kinds:
+- {"kind": "state", "deviceId", "capability", "operator": "=" | "<" | ">" | "changed", "value",
+  "timeWindow"?: {"from": "HH:MM", "to": "HH:MM", "weekdays"?: [0-6]}}: on a device change;
+- {"kind": "time", "at": "HH:MM", "weekdays"?: [0-6, 0=Monday]}: every day at that time;
+- {"kind": "first_motion", "delayMinutes": N, "weekdays"?: [...]}: N minutes after waking up.
+In an "all" reflex, state triggers next to a time trigger are conditions on the current state.
+Propose one for an insight with confidence >= {reflex_min} (sourceInsightId may be "" when you
+create that insight in the same decision), or when the user asks for it in chat (no insight
+needed; tell them to confirm it in "Aprendizagem"). Reflexes never do actions that need
+confirmation, and never duplicate an existing one. reflexUpdates {"reflexId", "op": "pause" |
+"delete" | "modify", ...}: keep only useful reflexes; pause or delete the ones the user keeps
+undoing or that no longer match what you see; createdBy "user" reflexes may only be paused.
+Woken by "Scheduled reflex due": decide whether its actions make sense now and, if so, return them.
 
-Routines (S3). You are only woken by device changes, chat, or wake-ups you schedule.
-- On startup, in full mode, or when an energy device (plug) is involved, call
-  get_routine_stats(deviceId, capability) on the plug's power or instantPower to find habits
-  (e.g. the coffee machine turned on on weekday mornings around 07:30). A routine is consistent
-  when it happened on most of the days with a small spread. Record it as an insight
-  (create/reinforce) and add to wakeUps [{"at": "HH:MM", "reason": "..."}] a time a few minutes
-  BEFORE the usual start (times from get_routine_stats are UTC, like "Now").
-- When you are woken for a routine, turn the device on if the routine still applies today
-  (weekday vs weekend) and say why in the explanation. Schedule another wake-up to turn it off
-  after the usual duration, or turn it off when its consumption drops back to idle.
-- Do not schedule a wake-up that is already listed under "Scheduled wake-ups".
+Routines. You are only woken by changes, chat, schedules and wake-ups.
+- At startup and in the daily review you get "Routine stats" (start time and minutes after the
+  first motion of the day, median and spread, per weekdays/weekends). A routine is consistent when
+  it happened on most days with a small spread; it follows waking up if the afterFirstMotion
+  spread is clearly smaller than the start-time spread.
+- For a consistent routine, in one decision: create (delta 0.85 when clearly consistent) or
+  reinforce the insight and propose a scheduled reflex a few minutes before it usually starts
+  (time or first_motion trigger). Until it is confirmed, cover today with a one-off wakeUp if
+  today's occurrence is still ahead, or act now if it is imminent.
+- wakeUps [{"at": "HH:MM" or ISO, "reason"}] are one-off follow-ups; never duplicate one listed
+  under "Scheduled wake-ups". A user asking in chat for something at a time gets a time reflex.
 
 Output:
-- explanation: one or two short sentences in European Portuguese (PT-PT) for the user, saying what
-  you did and why (e.g. "Baixei a luz da sala porque ligaste a televisão."). If you did nothing,
-  say briefly what you understood.
-- inferredRoom / inferredActivity: your best guess, or null.
-- confidence: 0..1.
-- beliefState: ALWAYS rewrite it (max ~800 chars, English is fine): who is where, what is
-  happening, open hypotheses, anything you want to remember next run.
+- Every action and reflex uses a deviceId that appears in this prompt; never invent one.
+- Everything the user sees is in European Portuguese (PT-PT): explanation, beliefState, insight
+  statements, reflex names and rationales, wake-up reasons.
+- explanation: one or two short sentences saying what you did and why, or what you understood if
+  you did nothing. It describes exactly your actions: never say you switched, dimmed or turned
+  something unless that action is in `actions`; for actions that need confirmation say you
+  suggest them. Refer to rooms and devices by name, never by id.
+- inferredRoom / inferredActivity: your best guess, or null. confidence: 0..1.
+- beliefState: ALWAYS rewrite it (max ~800 chars, shown to the user as "what the house thinks"):
+  who is where, what is happening, open hypotheses, what to remember next run.
 """
 
 
-def _device_line(d: Device) -> dict[str, Any]:
+def room_of(d: Device, names: dict[str, str] | None = None) -> str | None:
+    """Our room assignment first, else the room name the source reports (sim/Altice). With
+    `names` (room id -> name) our rooms are shown by name: the agent echoes what it sees in
+    user-facing fields (inferredRoom, explanation), and an id means nothing to the user."""
+    if d.roomId:
+        return (names or {}).get(d.roomId, d.roomId)
+    return d.roomName
+
+
+def _device_line(d: Device, names: dict[str, str] | None = None) -> dict[str, Any]:
     return {
         "id": d.id,
         "name": d.alias or d.name,
         "type": d.type,
         "source": d.source.value,
-        "roomId": d.roomId,
+        "room": room_of(d, names),
         "capabilities": {
             c.type: _cap(c.value, c.min, c.max, c.availableValues) for c in d.capabilities
         },
@@ -120,9 +153,20 @@ def build_prompt(
     cooldowns: list[str] | None = None,
     wake_reasons: list[str] | None = None,
     wakeups: list[str] | None = None,
+    devices: list[Device] | None = None,
+    presence: dict[str, Any] | None = None,
+    routines: list[dict[str, Any]] | None = None,
+    all_devices: bool = False,
+    standing_alerts: list[str] | None = None,
 ) -> str:
-    """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract)."""
+    """Render AgentRunInput into the prompt (plus Team A extras not in the shared contract).
+
+    `devices` (current state) lets a delta prompt describe each change (name, type, room) and
+    list the devices of the affected rooms, so the agent can act without tool round-trips.
+    """
     r = run_input
+    names = {room.id: room.name for room in r.rooms or []}
+    by_id = {d.id: d for d in devices or []}
     sections: list[str] = [f"Mode: {r.mode}", f"Now (house local time): {r.now.isoformat()}"]
     if wake_reasons:
         sections.append("Why you were woken up:\n" + "\n".join(f"- {w}" for w in wake_reasons))
@@ -138,8 +182,12 @@ def build_prompt(
         )
 
     if r.snapshot is not None:
-        devices = [_device_line(d) for d in r.snapshot.devices if d.enabled]
+        devices = [_device_line(d, names) for d in r.snapshot.devices if d.enabled]
         sections.append("Full snapshot (enabled devices):\n" + _json(devices))
+
+    def describe(device_id: str) -> dict[str, Any]:
+        d = by_id.get(device_id)
+        return {"name": d.alias or d.name, "type": d.type, "room": room_of(d, names)} if d else {}
 
     changes = [
         {
@@ -147,6 +195,7 @@ def build_prompt(
             "capability": c.capability,
             "old": c.old,
             "new": c.new,
+            **describe(c.deviceId),
             "at": c.at.isoformat(),
             **({"causedByAgent": True, "actionId": c.actionId} if c.causedByAgent else {}),
         }
@@ -156,9 +205,41 @@ def build_prompt(
         "Changes since your last run (oldest first):\n" + (_json(changes) if changes else "(none)")
     )
 
+    if standing_alerts:
+        sections.append(
+            "Long-standing alert readings (not new; treat them as that device's normal state here "
+            "unless they change):\n" + "\n".join(f"- {a}" for a in standing_alerts)
+        )
+
+    if presence is not None:
+        sections.append("Presence facts (raw; apply the empty-house rule yourself):\n"
+                        + _json(presence))
+
+    if routines is not None:
+        sections.append("Routine stats of the plugs (last 14 days, house local time like Now):\n"
+                        + (_json(routines) if routines else "(no plugs)"))
+
+    if r.snapshot is None and by_id and all_devices:
+        # Wake-ups (door timer, routine) have no changes but may act on any room.
+        sections.append(
+            "All devices (current state):\n"
+            + _json([_device_line(d, names) for d in by_id.values() if d.enabled])
+        )
+    elif r.snapshot is None and by_id:
+        changed = [by_id[c.deviceId] for c in r.changesSinceLastRun if c.deviceId in by_id]
+        rooms = {room_of(d, names) for d in changed if room_of(d, names)}
+        nearby = [d for d in by_id.values()
+                  if d.enabled and (room_of(d, names) in rooms or d in changed)]
+        if nearby:
+            sections.append(
+                "Devices in the affected rooms (current state):\n"
+                + _json([_device_line(d, names) for d in nearby])
+            )
+
     if r.plugins:
         sections.append(
-            "Device types involved (capability -> description, writable, autonomy):\n"
+            "Device types involved (capability -> description, writable, autonomy; "
+            "expectedBehaviours = what the house should do with this type):\n"
             + _json(
                 [
                     {
@@ -169,6 +250,8 @@ def build_prompt(
                             s.type: [s.description, s.writable, s.autonomy.value]
                             for s in p.capabilities
                         },
+                        **({"expectedBehaviours": p.starterAutomations}
+                           if p.starterAutomations else {}),
                     }
                     for p in r.plugins
                 ]
@@ -212,6 +295,8 @@ def build_prompt(
                         "actions": [a.model_dump(exclude_none=True) for a in x.actions],
                         "sourceInsightId": x.sourceInsightId,
                         "executions": x.executions, "undos": x.undos,
+                        "createdBy": x.createdBy, "askAgent": x.askAgent,
+                        "lastFiredAt": x.lastFiredAt.isoformat() if x.lastFiredAt else None,
                     }
                     for x in reflexes
                 ]

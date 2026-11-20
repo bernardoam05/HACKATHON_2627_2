@@ -1,8 +1,8 @@
 // Owner: Team B. Thin typed REST client for backend/app/api.
 import type {
   ActionRecord, AgentStatus, CapabilityUpdate, ChatRequest, ChatResponse, CooldownUpdate, Decision, Device,
-  DeviceAssignment, DeviceCooldown, DevicePlugin, Insight, PluginProposal, Reflex, Room, RoomCreate,
-  SimDeviceCreate, StateChange,
+  DeviceAssignment, DeviceCooldown, DevicePlugin, Insight, PluginProposal, Reflex, ReflexCreate, Room,
+  RoomCreate, SimDeviceCreate, StateChange,
 } from "./types";
 
 /** A non-2xx response. `detail` is the backend's reason ({"detail": str}, see docs/CONTRACTS.md 5.5). */
@@ -69,6 +69,7 @@ export const api = {
   insights: () => http<Insight[]>("GET", "/api/insights"),
   deleteInsight: (id: string) => http<void>("DELETE", `/api/insights/${id}`),
   reflexes: (status = "") => http<Reflex[]>("GET", `/api/reflexes${qs({ status })}`),
+  createReflex: (b: ReflexCreate) => http<Reflex>("POST", "/api/reflexes", b),
   confirmReflex: (id: string) => http<Reflex>("POST", `/api/reflexes/${id}/confirm`),
   pauseReflex: (id: string) => http<Reflex>("POST", `/api/reflexes/${id}/pause`),
   resumeReflex: (id: string) => http<Reflex>("POST", `/api/reflexes/${id}/resume`),

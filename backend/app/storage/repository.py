@@ -73,6 +73,20 @@ class Repository:
             StateSnapshot, "SELECT data FROM snapshots ORDER BY ts DESC LIMIT 1"
         )
 
+    async def first_snapshot_at(self) -> datetime | None:
+        """When the house started being observed (oldest stored snapshot)."""
+        async with self._db.execute("SELECT MIN(ts) AS ts FROM snapshots") as cur:
+            r = await cur.fetchone()
+        return datetime.fromisoformat(r["ts"]) if r and r["ts"] else None
+
+    async def last_change_at(self, device_id: str, capability: str) -> datetime | None:
+        async with self._db.execute(
+            "SELECT MAX(ts) AS ts FROM changes WHERE device_id = ? AND capability = ?",
+            (device_id, capability),
+        ) as cur:
+            r = await cur.fetchone()
+        return datetime.fromisoformat(r["ts"]) if r and r["ts"] else None
+
     # --- changes (HistoryService) -----------------------------------------------------------
 
     async def add_changes(self, changes: list[StateChange]) -> None:

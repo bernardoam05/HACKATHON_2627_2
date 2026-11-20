@@ -8,7 +8,7 @@ import asyncio
 import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from pydantic_ai import Agent, ModelRetry, RunContext
@@ -47,8 +47,10 @@ def register_tools(agent: Agent[AgentDeps, Any]) -> None:
     ) -> dict[str, Any]:
         """Daily usage of one capability over the last `days`: per day the first time it became
         active (power on, bool true, or numeric value > threshold, e.g. watts) and for how long,
-        plus weekday/weekend medians and spread. Times are UTC. Use it to find routines."""
-        return await compute_routine_stats(ctx.deps.repo, device_id, capability, days, threshold)
+        plus weekday/weekend medians and spread, and the delay after the first motion of the
+        day. Times are house local time (like Now). Use it to find routines."""
+        return await compute_routine_stats(ctx.deps.repo, device_id, capability, days, threshold,
+                                           tz=ctx.deps.now().tzinfo)
 
     @agent.tool
     async def get_presence_facts(ctx: RunContext[AgentDeps]) -> dict[str, Any]:
@@ -103,11 +105,20 @@ DOOR_CAPABILITIES = ("sensorState",)
 MOTION_CAPABILITY = "motionDetected"
 
 
+DOOR_OPEN_VALUES = frozenset({"alarm", "open"})  # Altice fixtures use alarm; demo scenarios use open
+DOOR_CLOSED_VALUES = frozenset({"normal", "closed"})
+
+
 def door_is_open(capability: str, value: Any) -> bool | None:
-    """contactSensor `sensorState`: "alarm" = open, "normal" = closed.
-    None when the change is not a door reading."""
-    if capability == "sensorState":
-        return str(value).lower() == "alarm"
+    """contactSensor `sensorState`: "alarm"/"open" = open, "normal"/"closed" = closed.
+    None when the change is not a door reading (or the value is unknown)."""
+    if capability != "sensorState":
+        return None
+    v = str(value).lower()
+    if v in DOOR_OPEN_VALUES:
+        return True
+    if v in DOOR_CLOSED_VALUES:
+        return False
     return None
 
 
@@ -127,6 +138,11 @@ async def entrance_door_ids(registry: DeviceRegistry, rooms: list[Room]) -> set[
     }
 
 
+def _room(dev: Any) -> str | None:
+    """Our room assignment, else the room name the source reports (sim/Altice)."""
+    return (dev.roomId or dev.roomName) if dev is not None else None
+
+
 async def compute_presence_facts(
     registry: DeviceRegistry, repo: Repository, empty_after_seconds: float, lookback_hours: float = 12
 ) -> PresenceFacts:
@@ -143,12 +159,11 @@ async def compute_presence_facts(
         if c.deviceId in doors and c.capability in DOOR_CAPABILITIES:
             opened = door_is_open(c.capability, c.new)
             if opened:
-                last_door = DoorEvent(deviceId=c.deviceId, roomId=dev.roomId if dev else None,
-                                      openedAt=c.at)
+                last_door = DoorEvent(deviceId=c.deviceId, roomId=_room(dev), openedAt=c.at)
             elif opened is False and last_door is not None and last_door.closedAt is None:
                 last_door.closedAt = c.at
         elif c.capability == MOTION_CAPABILITY and dev is not None and is_motion(c.new):
-            last_motion[c.deviceId] = RoomMotion(roomId=dev.roomId, deviceId=c.deviceId, at=c.at)
+            last_motion[c.deviceId] = RoomMotion(roomId=_room(dev), deviceId=c.deviceId, at=c.at)
 
     motions = sorted(last_motion.values(), key=lambda m: m.at)
     door_at = (last_door.closedAt or last_door.openedAt) if last_door else None
@@ -200,9 +215,13 @@ class PresenceWatcher:
 
     async def _fire(self) -> None:
         await asyncio.sleep(self._delay + 1)
+        await self._fire_now()
+
+    async def _fire_now(self) -> None:
         await self._wake(
-            f"{self._delay:.0f}s have passed since the last entrance-door event. "
-            "Call get_presence_facts() and apply the empty-house rule."
+            f"Door check: {self._delay:.0f}s after the last entrance-door event. Look at the "
+            "presence facts below to see whether someone is still at home (motion after the door "
+            "event means yes)."
         )
 
 
@@ -248,17 +267,42 @@ def _summary(days: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _offset_summary(days: list[dict[str, Any]]) -> dict[str, Any]:
+    offsets = sorted(d["afterFirstMotionMin"] for d in days if d["afterFirstMotionMin"] is not None)
+    if not offsets:
+        return {"days": 0}
+    return {"days": len(offsets), "medianMin": round(statistics.median(offsets), 1),
+            "spreadMin": round(offsets[-1] - offsets[0], 1)}
+
+
 def routine_stats(
     changes: list[StateChange], device_id: str, capability: str, days: int, threshold: float,
-    today: datetime,
+    today: datetime, motion_changes: list[StateChange] | None = None, tz: tzinfo | None = None,
 ) -> dict[str, Any]:
-    """Per day: first activation time and how long it stayed active. Times are UTC."""
+    """Per day: first activation time, how long it stayed active, the first motion of the day
+    and how many minutes after it the device became active. Times and days are in `tz` (the
+    house's time zone; UTC when not given).
+
+    Summaries per weekday/weekend group: start times (`medianFirstOn`, spread) and the delay
+    after the first motion (`afterFirstMotion`). A small delay spread with a large start spread
+    means "N minutes after waking up" rather than "at a fixed time"."""
+    if tz is not None:  # local days and HH:MM (a 07:30 coffee is 07:30 summer and winter)
+        today = today.astimezone(tz)
+        changes = [c.model_copy(update={"at": c.at.astimezone(tz)}) for c in changes]
+        motion_changes = [c.model_copy(update={"at": c.at.astimezone(tz)})
+                          for c in motion_changes or []]
     first_day = (today - timedelta(days=days - 1)).date()
     by_day: dict[Any, dict[str, Any]] = {}
     for i in range(days):
         d = first_day + timedelta(days=i)
         by_day[d] = {"date": d.isoformat(), "weekday": d.weekday(), "firstOn": None,
-                     "durationMin": None, "activations": 0}
+                     "durationMin": None, "activations": 0, "firstMotion": None,
+                     "afterFirstMotionMin": None}
+    first_motion: dict[Any, datetime] = {}
+    for c in motion_changes or []:
+        if is_motion(c.new) and c.at.date() in by_day and c.at.date() not in first_motion:
+            first_motion[c.at.date()] = c.at
+    first_on: dict[Any, datetime] = {}
     active_since: datetime | None = None
     was_active = False
     for c in changes:  # oldest first
@@ -270,28 +314,38 @@ def routine_stats(
                 day["activations"] += 1
                 if day["firstOn"] is None:
                     day["firstOn"] = _hm(c.at)
+                    first_on[c.at.date()] = c.at
         elif was_active and not now_active and active_since is not None:
             start_day = by_day.get(active_since.date())
             if start_day is not None and start_day["firstOn"] == _hm(active_since):
                 start_day["durationMin"] = round((c.at - active_since).total_seconds() / 60, 1)
             active_since = None
         was_active = now_active
+    for day_key, moved in first_motion.items():
+        by_day[day_key]["firstMotion"] = _hm(moved)
+        on = first_on.get(day_key)
+        if on is not None and on >= moved:
+            by_day[day_key]["afterFirstMotionMin"] = round((on - moved).total_seconds() / 60, 1)
     rows = list(by_day.values())
+    weekdays = [r for r in rows if r["weekday"] < 5]
+    weekends = [r for r in rows if r["weekday"] >= 5]
     return {
         "deviceId": device_id,
         "capability": capability,
         "threshold": threshold,
-        "timezone": "UTC",
-        "weekdays": _summary([r for r in rows if r["weekday"] < 5]),
-        "weekends": _summary([r for r in rows if r["weekday"] >= 5]),
+        "timezone": str(tz) if tz is not None else "UTC",
+        "weekdays": {**_summary(weekdays), "afterFirstMotion": _offset_summary(weekdays)},
+        "weekends": {**_summary(weekends), "afterFirstMotion": _offset_summary(weekends)},
         "byDay": rows,
     }
 
 
 async def compute_routine_stats(
-    repo: Repository, device_id: str, capability: str, days: int = 14, threshold: float = 20
+    repo: Repository, device_id: str, capability: str, days: int = 14, threshold: float = 20,
+    tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     today = datetime.now(UTC)
-    since = datetime.combine((today - timedelta(days=days)).date(), datetime.min.time(), UTC)
+    since = datetime.combine((today - timedelta(days=days + 1)).date(), datetime.min.time(), UTC)
     changes = await repo.changes_between(since, today, device_id=device_id, capability=capability)
-    return routine_stats(changes, device_id, capability, days, threshold, today)
+    motion = await repo.changes_between(since, today, capability=MOTION_CAPABILITY)
+    return routine_stats(changes, device_id, capability, days, threshold, today, motion, tz=tz)
