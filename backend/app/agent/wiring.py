@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Any
 
+from dotenv import dotenv_values
+
 from app.api.ports import Services
 from app.api.ws import broadcaster
 from app.config import Settings
@@ -88,6 +90,12 @@ def export_agent_api_key(settings: Settings) -> str | None:
     for name in expand_spec(settings.AGENT_MODEL_REASONING) + reasoning_names(settings):
         keys.setdefault(_provider(name), reasoning_key)
     exported: list[str] = []
+    dotenv = dotenv_values(".env")  # provider-specific keys written straight in .env
+    for provider in keys:
+        var = PROVIDER_KEY_ENV.get(provider)
+        if var and dotenv.get(var) and var not in os.environ:
+            os.environ[var] = str(dotenv[var])
+            exported.append(var)
     for provider, key in keys.items():
         if not key:
             continue

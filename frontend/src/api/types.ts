@@ -230,6 +230,10 @@ export interface RunInfo {
   modelRequests: number;
   /** Models that failed before the answering one, in order. Empty when the first model answered. */
   fallbacks?: FallbackInfo[];
+  /** Prompt tokens summed over the run's model requests (absent when the provider reports none). */
+  inputTokens?: number | null;
+  /** Completion tokens (incl. thinking) summed over the run. */
+  outputTokens?: number | null;
 }
 
 export interface Decision {
