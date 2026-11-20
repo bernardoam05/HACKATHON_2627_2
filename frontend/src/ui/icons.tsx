@@ -40,3 +40,19 @@ export const ChevronIcon = ({ open = false, className = "size-4", ...p }: IconPr
     <path d="M9 6l6 6-6 6" />
   </Icon>
 );
+
+export const RefreshIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4" /></Icon>
+);
+
+export const BoltIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></Icon>
+);
+
+export const CheckIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M5 12.5l4.5 4.5L19 7" /></Icon>
+);
+
+export const PersonIcon = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="7" r="3.5" /><path d="M5 21a7 7 0 0 1 14 0" /></Icon>
+);

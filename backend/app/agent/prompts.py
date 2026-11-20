@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from app.schemas import AgentRunInput, Device, Reflex
@@ -215,6 +216,13 @@ def build_prompt(
         sections.append("Presence facts (raw; apply the empty-house rule yourself):\n"
                         + _json(presence))
 
+    motion_now = _motion_by_room(by_id.values(), names)
+    if motion_now and any(c.capability == "motionDetected" for c in r.changesSinceLastRun):
+        # A motion change alone is ambiguous (stopped = sat still, or moved away?); the motion in
+        # every room tells which. Raw fact only: where the person is stays the agent's call (D3).
+        sections.append("Motion right now in every room (true = motion detected):\n"
+                        + _json(motion_now))
+
     if routines is not None:
         sections.append("Routine stats of the plugs (last 14 days, house local time like Now):\n"
                         + (_json(routines) if routines else "(no plugs)"))
@@ -316,6 +324,18 @@ def build_prompt(
         )
 
     return "\n\n".join(sections)
+
+
+def _motion_by_room(devices: Iterable[Device], names: dict[str, str]) -> dict[str, bool]:
+    """Room -> any enabled motion reading (sensor or camera) true right now."""
+    out: dict[str, bool] = {}
+    for d in devices:
+        cap = d.capability("motionDetected")
+        room = room_of(d, names)
+        if not d.enabled or cap is None or not room:
+            continue
+        out[room] = out.get(room, False) or cap.value is True or cap.value == "true"
+    return out
 
 
 def _json(value: Any) -> str:

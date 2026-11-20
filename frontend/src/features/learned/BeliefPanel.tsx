@@ -3,7 +3,7 @@ import { api } from "../../api/client";
 import { useLiveMessages } from "../../live/LiveProvider";
 import { formatClock, timeAgo, useNow } from "../../lib/time";
 import { useResource } from "../../lib/useResource";
-import { Button, Card, Empty, ErrorNote, Loading } from "../../ui";
+import { Button, Card, Empty, ErrorNote, Loading, RefreshIcon } from "../../ui";
 
 export default function BeliefPanel() {
   const status = useResource(api.agentStatus);
@@ -19,7 +19,7 @@ export default function BeliefPanel() {
   const s = status.data;
   return (
     <Card title="O que a casa pensa que está a acontecer"
-          actions={<Button variant="ghost" onClick={status.reload}>Atualizar</Button>}>
+          actions={<Button variant="ghost" onClick={status.reload} aria-label="Atualizar" title="Atualizar"><RefreshIcon className="size-4" /></Button>}>
       {status.error ? <ErrorNote message={status.error} onRetry={status.reload} />
         : !s ? <Loading />
         : !s.beliefState ? <Empty>A casa ainda não formou uma ideia do que se passa.</Empty>
