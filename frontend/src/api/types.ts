@@ -214,6 +214,24 @@ export interface ReflexUpdate {
 
 export type DecisionTrigger = "state_change" | "chat" | "startup" | "reflex_report";
 
+/** A model of the fallback chain that failed before another one answered. */
+export interface FallbackInfo {
+  model: string;
+  error: string;
+  ms: number;
+}
+
+/** Telemetry of the agent run behind a Decision. `durationMs` = LLM time, prompt sent -> answer. */
+export interface RunInfo {
+  durationMs: number;
+  model?: string | null;
+  tier: "fast" | "reasoning";
+  mode: "delta" | "full";
+  modelRequests: number;
+  /** Models that failed before the answering one, in order. Empty when the first model answered. */
+  fallbacks?: FallbackInfo[];
+}
+
 export interface Decision {
   id: string;
   createdAt: ISODate;
@@ -227,6 +245,8 @@ export interface Decision {
   insightUpdates: InsightUpdate[];
   reflexProposals: ReflexProposal[];
   reflexUpdates: ReflexUpdate[];
+  /** Absent on old decisions and on ones made without an LLM run. */
+  runInfo?: RunInfo | null;
 }
 
 export interface ChatRequest { message: string; inputMode: "text" | "voice" }

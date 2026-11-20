@@ -85,6 +85,9 @@ async def test_s1_tv_on_dims_light(home):
     assert action.status == ActionStatus.executed and action.autonomy.value == "auto"
     [decision] = await services.actions.list_decisions(10)
     assert decision.explanation.startswith("Baixei a luz")
+    info = decision.runInfo  # telemetry of the run, persisted with the decision
+    assert info is not None and info.durationMs >= 0 and info.modelRequests >= 1
+    assert info.mode == "full" and info.tier == "fast"
     assert len(PROMPTS) == 1 and "Mode: full" in PROMPTS[0]  # first run is always full
 
     status = await services.agent.status()

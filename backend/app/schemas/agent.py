@@ -138,6 +138,27 @@ class DecisionTrigger(str, Enum):
     reflex_report = "reflex_report"
 
 
+class FallbackInfo(BaseModel):
+    """A model of the fallback chain that failed before another one answered."""
+
+    model: str
+    error: str = Field(description="Error class and HTTP status, e.g. 'ModelUnavailableError 503'")
+    ms: int = Field(ge=0, description="Time lost on this attempt")
+
+
+class RunInfo(BaseModel):
+    """Telemetry of the agent run that produced a Decision."""
+
+    durationMs: int = Field(ge=0, description="Wall time of the LLM run (prompt sent -> answer)")
+    model: str | None = Field(default=None, description="Model(s) that answered, comma-separated")
+    tier: Literal["fast", "reasoning"]
+    mode: Literal["delta", "full"]
+    modelRequests: int = Field(default=1, ge=0, description="LLM round-trips (tool loops add more)")
+    fallbacks: list[FallbackInfo] = Field(
+        default=[], description="Models that failed before the answering one, in order"
+    )
+
+
 class Decision(BaseModel):
     id: str
     createdAt: datetime
@@ -151,6 +172,9 @@ class Decision(BaseModel):
     insightUpdates: list[InsightUpdate] = []
     reflexProposals: list[ReflexProposal] = []
     reflexUpdates: list[ReflexUpdate] = []
+    runInfo: RunInfo | None = Field(
+        default=None, description="Absent on decisions made without an LLM run (and old ones)"
+    )
 
 
 class AgentRunInput(BaseModel):

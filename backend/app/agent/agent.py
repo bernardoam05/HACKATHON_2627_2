@@ -11,6 +11,7 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -44,12 +45,14 @@ from app.schemas import (
     DecisionMsg,
     DecisionTrigger,
     DevicePlugin,
+    FallbackInfo,
     Insight,
     InsightUpdate,
     ProposedAction,
     Reflex,
     ReflexCreate,
     ReflexStatus,
+    RunInfo,
     StateSnapshot,
 )
 from app.storage.repository import Repository
@@ -135,16 +138,33 @@ AUTO_MODELS: tuple[str, ...] = (
 )
 
 
-def _log_run(trigger: DecisionTrigger, seconds: float, result: Any) -> None:
-    """One line per agent run: duration, model round-trips, models used, tools called."""
+# Models that failed during the current run (filled by _TimedModel, read by _log_run). Runs are
+# serialised by the agent lock, and the context var keeps a stray call from touching another run.
+_FAILED_MODELS: ContextVar[list[FallbackInfo] | None] = ContextVar("failed_models", default=None)
+
+
+def _log_run(
+    trigger: DecisionTrigger, seconds: float, result: Any, *, tier: str, mode: str,
+    fallbacks: list[FallbackInfo] | None = None,
+) -> RunInfo:
+    """One line per agent run (duration, model round-trips, models used, tools called) and the
+    same figures as the `RunInfo` stored on the Decision. Telemetry must never break a run."""
     try:
         responses = [m for m in result.all_messages() if isinstance(m, ModelResponse)]
-    except Exception:  # noqa: BLE001 - logging must never break a run
-        return
+    except Exception:  # noqa: BLE001
+        responses = []
     tools = [p.tool_name for m in responses for p in m.parts if isinstance(p, ToolCallPart)]
     models = sorted({m.model_name for m in responses if m.model_name})
     log.info("agent run done (%s) in %.1fs: %d model requests via %s, tools=%s",
              trigger.value, seconds, len(responses), ",".join(models) or "?", tools)
+    return RunInfo(
+        durationMs=round(seconds * 1000),
+        model=",".join(models) or None,
+        tier="reasoning" if tier == "reasoning" else "fast",
+        mode="full" if mode == "full" else "delta",
+        modelRequests=len(responses),
+        fallbacks=list(fallbacks or []),
+    )
 
 
 # AGENT_MODEL_REASONING=auto-reasoning: the Flash models first (they reason better: in the eval
@@ -275,8 +295,17 @@ class _TimedModel(WrapperModel):
         try:
             return await super().request(messages, model_settings, params)
         except Exception as e:
+            elapsed = time.monotonic() - started
             log.info("model %s failed after %.1fs: %s %s", self.model_name,
-                     time.monotonic() - started, type(e).__name__, str(e)[:160])
+                     elapsed, type(e).__name__, str(e)[:160])
+            failed = _FAILED_MODELS.get()
+            if failed is not None:
+                status = getattr(e, "status_code", None)
+                failed.append(FallbackInfo(
+                    model=self.model_name,
+                    error=f"{type(e).__name__}{f' {status}' if status else ''}",
+                    ms=round(elapsed * 1000),
+                ))
             raise
 
 
@@ -565,6 +594,8 @@ class HomeAgent:
             reasoning = trigger != DecisionTrigger.state_change or bool(wake_reasons)
             if not use_tools:
                 prompt += NO_TOOLS_NOTE
+            failed_models: list[FallbackInfo] = []
+            _FAILED_MODELS.set(failed_models)
             started = time.monotonic()
             log.info("agent run started (%s, %s mode, %d changes, tools=%s, tier=%s)",
                      trigger.value, run_input.mode, len(changes), use_tools,
@@ -577,8 +608,10 @@ class HomeAgent:
                          type(e).__name__)
                 self._wake_reasons = wake_reasons + self._wake_reasons  # retry them next run
                 raise
-            _log_run(trigger, time.monotonic() - started, result)
-            decision = await self._finish(result.output, trigger, run_input)
+            run_info = _log_run(trigger, time.monotonic() - started, result,
+                                tier="reasoning" if reasoning else "fast", mode=run_input.mode,
+                                fallbacks=failed_models)
+            decision = await self._finish(result.output, trigger, run_input, run_info)
             self._last_cutoff = cutoff
             return decision
 
@@ -708,7 +741,11 @@ class HomeAgent:
         )
 
     async def _finish(
-        self, out: AgentOutput, trigger: DecisionTrigger, run_input: AgentRunInput
+        self,
+        out: AgentOutput,
+        trigger: DecisionTrigger,
+        run_input: AgentRunInput,
+        run_info: RunInfo | None = None,
     ) -> Decision:
         belief = await self._belief.save(out.beliefState, run_input.mode, datetime.now(UTC))
         decision_id = uuid.uuid4().hex
@@ -740,6 +777,7 @@ class HomeAgent:
             insightUpdates=out.insightUpdates,
             reflexProposals=proposals,
             reflexUpdates=reflex_updates,
+            runInfo=run_info,
         )
         await self._repo.save_decision(decision)
         for w in out.wakeUps:

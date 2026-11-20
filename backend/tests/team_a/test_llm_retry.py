@@ -13,6 +13,7 @@ from test_devices_poller import fake_server, sim_devices
 from app.agent.agent import (
     AUTO_MODELS,
     MAX_MODEL_REQUESTS,
+    _TimedModel,
     build_model,
     is_transient_llm_error,
     model_names,
@@ -108,6 +109,22 @@ async def test_fallback_model_takes_over_when_the_first_is_overloaded():
     )
     assert len(decisions) == 1
     assert overloaded.calls == 1 and backup.calls == 1  # switched at once, no retry wait
+
+
+async def test_run_info_lists_the_models_that_failed_before_the_answer():
+    first = Flaky(99, ModelUnavailableError("m1", "503 high demand"))
+    second = Flaky(99, ModelHTTPError(413, "m2"))
+    last = Flaky(0, RuntimeError("unused"))
+    chain = FallbackModel(*[_TimedModel(FunctionModel(f)) for f in (first, second, last)])
+    [decision], _ = await run_once(first, model=chain)
+    info = decision.runInfo
+    assert info is not None and info.modelRequests == 1
+    assert [f.error.split()[0] for f in info.fallbacks] == ["ModelUnavailableError", "ModelHTTPError"]
+    assert info.fallbacks[1].error.endswith("413")
+    assert all(f.ms >= 0 and f.model for f in info.fallbacks)
+    # A clean run afterwards starts from an empty list
+    [clean], _ = await run_once(last, model=FunctionModel(last))
+    assert clean.runInfo is not None and clean.runInfo.fallbacks == []
 
 
 async def test_whole_chain_failing_transiently_is_retried():

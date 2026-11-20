@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 from app.schemas import (
     AutonomyLevel,
     CooldownUpdate,
+    Decision,
     Device,
     DeviceCooldown,
     DevicePlugin,
@@ -16,6 +17,7 @@ from app.schemas import (
     PresenceFacts,
     ReflexCreate,
     ReflexTrigger,
+    RunInfo,
     StateChangedMsg,
     WsMessage,
 )
@@ -88,6 +90,27 @@ def test_cooldown_contract():
     ended = TypeAdapter(WsMessage).validate_python(
         {"type": "cooldown_ended", "deviceId": "d", "reason": "user"})
     assert ended.type == "cooldown_ended"
+
+
+def test_decision_run_info_is_optional_and_validated():
+    base = {"id": "d", "createdAt": "2026-11-20T10:00:00Z", "trigger": "chat", "explanation": "x"}
+    assert Decision.model_validate(base).runInfo is None  # decisions stored before runInfo
+    d = Decision.model_validate({**base, "runInfo": {
+        "durationMs": 35300, "model": "gemini-2.5-flash", "tier": "reasoning", "mode": "full"}})
+    assert d.runInfo.durationMs == 35300 and d.runInfo.modelRequests == 1
+    assert d.runInfo.fallbacks == []  # the first model answered
+    assert Decision.model_validate_json(d.model_dump_json()).runInfo == d.runInfo
+    f = RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta", "fallbacks": [
+        {"model": "a", "error": "ModelUnavailableError 503", "ms": 1200}]})
+    assert f.fallbacks[0].model == "a" and f.fallbacks[0].ms == 1200
+    with pytest.raises(ValidationError):
+        RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta",
+                                "fallbacks": [{"model": "a", "error": "x", "ms": -1}]})
+    for bad in ({"durationMs": -1, "tier": "fast", "mode": "delta"},
+                {"durationMs": 1, "tier": "slow", "mode": "delta"},
+                {"durationMs": 1, "tier": "fast", "mode": "partial"}):
+        with pytest.raises(ValidationError):
+            RunInfo.model_validate(bad)
 
 
 def test_now_is_timezone_aware_example():

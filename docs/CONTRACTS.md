@@ -47,7 +47,9 @@ Device/capability field names keep **Altice camelCase** on purpose.
 ### 5.4 Agent — `schemas/agent.py`
 
 - `ProposedAction {deviceId, update: CapabilityUpdate, reason}`
-- `Decision {id, createdAt, trigger: state_change | chat | startup | reflex_report, explanation (user-facing, PT-PT), inferredRoom?, inferredActivity?, actions: ProposedAction[], confidence: 0..1, beliefState: str (≤ ~800 chars, agent-written), insightUpdates: InsightUpdate[], reflexProposals: ReflexProposal[], reflexUpdates: ReflexUpdate[]}`
+- `Decision {id, createdAt, trigger: state_change | chat | startup | reflex_report, explanation (user-facing, PT-PT), inferredRoom?, inferredActivity?, actions: ProposedAction[], confidence: 0..1, beliefState: str (≤ ~800 chars, agent-written), insightUpdates: InsightUpdate[], reflexProposals: ReflexProposal[], reflexUpdates: ReflexUpdate[], runInfo?: RunInfo | null}`
+- `RunInfo {durationMs: int ≥ 0 (LLM time, prompt sent → answer; excludes executing the actions), model?: str (comma-separated if a fallback chain answered), tier: fast | reasoning, mode: delta | full, modelRequests: int (LLM round-trips; tool loops in chat add more), fallbacks: FallbackInfo[] = [] (models that failed before the answering one, in order)}`
+- `FallbackInfo {model: str, error: str (error class + HTTP status, e.g. "ModelUnavailableError 503"), ms: int ≥ 0 (time lost on that attempt)}`: telemetry of the run behind a decision. Optional: absent on decisions stored before it existed.
 - `Insight {id, statement, confidence: 0..1, evidence: str[] (change/action/feedback ids), createdAt, lastConfirmedAt, status: active | dropped}`
 - `InsightUpdate {op: create | reinforce | weaken | delete, insightId?, statement?, delta?: float, evidence?: str[]}`
 - `ReflexTrigger {kind: state | time | first_motion = state, deviceId = "", capability = "", operator: "=" | "<" | ">" | "changed" = "=", value?, roomId?, timeWindow?: {from: "HH:MM", to: "HH:MM", weekdays?: int[]}, at?: "HH:MM", weekdays?: int[] (0 = Monday), delayMinutes?: 0..720}`:
