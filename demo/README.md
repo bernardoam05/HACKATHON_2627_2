@@ -86,7 +86,7 @@ O horário diário proposto confirma-se em **Aprendizagem**.
 ```
 cd backend && EMPTY_AFTER_MINUTES=0.5 DB_PATH=demo.db uv run uvicorn app.main:app
 cd simulator && uv run python ../demo/run_scenario.py s4
-```
+``` 
 A porta tem de acabar **fechada** e não pode haver movimento durante 30 s. Armar o alarme é
 sempre só sugestão (e só existe no gateway real).
 
