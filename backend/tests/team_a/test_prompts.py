@@ -38,6 +38,25 @@ def test_delta_prompt_describes_changes_and_affected_rooms():
     assert "light-kitchen" not in affected and '"tv"' not in affected  # other rooms stay out
 
 
+def test_motion_change_shows_motion_in_every_room():
+    # S2 second half: motion stopped in the kitchen while the corridor still has motion.
+    change = StateChange(id="c1", deviceId="motion-kitchen", capability="motionDetected",
+                         old=True, new=False, at=NOW)
+    prompt = build_prompt(
+        AgentRunInput(mode="delta", changesSinceLastRun=[change], now=NOW), devices=HOUSE
+    )
+    assert 'Motion right now in every room (true = motion detected):\n' \
+           '{"Corredor": true, "Cozinha": false}' in prompt
+
+
+def test_no_motion_section_without_motion_change():
+    change = StateChange(id="c1", deviceId="tv", capability="power", old="off", new="on", at=NOW)
+    prompt = build_prompt(
+        AgentRunInput(mode="delta", changesSinceLastRun=[change], now=NOW), devices=HOUSE
+    )
+    assert "Motion right now" not in prompt
+
+
 def test_full_prompt_has_no_affected_rooms_section():
     from app.schemas import StateSnapshot
 

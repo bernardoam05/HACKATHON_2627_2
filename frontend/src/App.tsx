@@ -1,7 +1,8 @@
-// Owner: Team B. App shell: tabs for Chat / Atividade / Aprendizagem / Gestor.
+// Owner: Team B. App shell: tabs for Chat / Casa / Atividade / Aprendizagem / Gestor.
 import { useEffect, useState } from "react";
 import ActivityFeed from "./features/activity/ActivityFeed";
 import ChatPage from "./features/chat/ChatPage";
+import HousePage from "./features/house/HousePage";
 import CooldownList from "./features/cooldowns/CooldownList";
 import CooldownNotices from "./features/cooldowns/CooldownNotices";
 import BeliefPanel from "./features/learned/BeliefPanel";
@@ -17,6 +18,7 @@ import { Badge, Dot, MoonIcon, SunIcon } from "./ui";
 
 const TABS = [
   { id: "chat", label: "Chat" },
+  { id: "house", label: "Casa" },
   { id: "activity", label: "Atividade" },
   { id: "learned", label: "Aprendizagem" },
   { id: "manager", label: "Gestor" },
@@ -65,6 +67,7 @@ export default function App() {
       <main className="grid gap-4">
         {/* Tabs stay mounted so chat history and live feeds survive switching tabs. */}
         <div hidden={tab !== "chat"}><ChatPage /></div>
+        <div hidden={tab !== "house"}><HousePage /></div>
         <div hidden={tab !== "activity"}><ActivityFeed /></div>
         <div hidden={tab !== "learned"} className="grid gap-4"><BeliefPanel /><InsightsList /><ReflexList /></div>
         <div hidden={tab !== "manager"} className="grid gap-4">

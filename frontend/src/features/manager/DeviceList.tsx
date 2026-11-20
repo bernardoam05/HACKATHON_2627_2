@@ -7,6 +7,7 @@ import { formatValue, useDevices } from "../../live/DevicesProvider";
 import { blockedLabel } from "../cooldowns/CooldownOptions";
 import { useRooms } from "../../live/RoomsProvider";
 import { errorMessage, useResource } from "../../lib/useResource";
+import { timeAgo, useNow } from "../../lib/time";
 import {
   Badge, Button, Card, Combobox, Empty, ErrorNote, Expandable, Field, inputClass, Loading, normalize,
   type ComboOption,
@@ -84,6 +85,23 @@ function cap(d: Device, type: string): Capability | undefined {
   return d.capabilities.find((c) => c.type === type);
 }
 
+/** Altice has no "online" flag; a real device silent for longer than this is shown as offline. */
+const OFFLINE_AFTER_MS = 60 * 60 * 1000;
+
+/** Last contact as epoch millis (Altice sends millis; tolerate numeric strings and ISO). */
+function lastSeen(d: Device): number | undefined {
+  const t = d.lastCommunicationTime;
+  if (t === null || t === undefined || t === "") return undefined;
+  const ms = typeof t === "number" ? t : /^\d+$/.test(t) ? Number(t) : new Date(t).getTime();
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/** A real device that has not talked to Altice recently (simulated devices are never offline). */
+export function isOffline(d: Device, now: number): boolean {
+  const seen = d.source === "sim" ? undefined : lastSeen(d);
+  return seen !== undefined && now - seen > OFFLINE_AFTER_MS;
+}
+
 const isOn = (v: JsonValue | undefined) => v === "on" || v === true;
 
 /** One short PT-PT line with what matters for this device right now. */
@@ -109,8 +127,12 @@ function stateSummary(d: Device): string {
 function DeviceItem({ device }: { device: Device }) {
   const summary = stateSummary(device);
   const cooldown = useCooldown(device.id);
+  const now = useNow(60_000);
+  const seen = lastSeen(device);
+  const offline = isOffline(device, now);
+  const dim = offline ? "opacity-50" : device.enabled ? "" : "opacity-70";
   return (
-    <Expandable className={device.enabled ? "" : "opacity-70"} summary={
+    <Expandable className={dim} summary={
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="m-0 font-medium">{displayName(device)}</p>
@@ -119,6 +141,11 @@ function DeviceItem({ device }: { device: Device }) {
         <div className="flex flex-wrap items-center gap-1.5">
           {cooldown && <Badge tone="warn">{blockedLabel(cooldown)}</Badge>}
           {!device.enabled && <Badge tone="warn">Desativado</Badge>}
+          {offline && seen !== undefined && (
+            <span title={`Última comunicação ${timeAgo(new Date(seen).toISOString(), now)}`}>
+              <Badge tone="neutral">Offline</Badge>
+            </span>
+          )}
           <Badge tone={device.source === "sim" ? "accent" : "neutral"}>
             {device.source === "sim" ? "Simulado" : "Real"}
           </Badge>
