@@ -167,6 +167,10 @@ def build_prompt(
     r = run_input
     names = {room.id: room.name for room in r.rooms or []}
     by_id = {d.id: d for d in devices or []}
+    # Stable blocks (rooms, insights, reflexes) go first and the volatile ones (mode, now, changes,
+    # wake reasons) after them, so consecutive prompts share the longest possible prefix and the
+    # provider's implicit prompt cache can reuse it.
+    stable: list[str] = []
     sections: list[str] = [f"Mode: {r.mode}", f"Now (house local time): {r.now.isoformat()}"]
     if wake_reasons:
         sections.append("Why you were woken up:\n" + "\n".join(f"- {w}" for w in wake_reasons))
@@ -177,7 +181,7 @@ def build_prompt(
         sections.append("Your previous belief state: (none, first run)")
 
     if r.rooms:
-        sections.append(
+        stable.append(
             "Rooms:\n" + _json([r_.model_dump() for r_ in r.rooms])
         )
 
@@ -259,7 +263,7 @@ def build_prompt(
         )
 
     if r.insights:
-        sections.append(
+        stable.append(
             "What you have learned (insights):\n"
             + _json(
                 [{"id": i.id, "statement": i.statement, "confidence": i.confidence} for i in r.insights]
@@ -284,7 +288,7 @@ def build_prompt(
         )
 
     if reflexes:
-        sections.append(
+        stable.append(
             "Reflexes:\n"
             + _json(
                 [
@@ -315,7 +319,7 @@ def build_prompt(
             + _json([f.model_dump(mode="json", exclude_none=True) for f in r.feedback])
         )
 
-    return "\n\n".join(sections)
+    return "\n\n".join(stable + sections)
 
 
 def _json(value: Any) -> str:

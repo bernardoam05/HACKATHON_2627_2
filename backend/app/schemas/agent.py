@@ -157,6 +157,12 @@ class RunInfo(BaseModel):
     fallbacks: list[FallbackInfo] = Field(
         default=[], description="Models that failed before the answering one, in order"
     )
+    inputTokens: int | None = Field(
+        default=None, ge=0, description="Prompt tokens summed over the run's model requests"
+    )
+    outputTokens: int | None = Field(
+        default=None, ge=0, description="Completion tokens (incl. thinking) summed over the run"
+    )
 
 
 class Decision(BaseModel):

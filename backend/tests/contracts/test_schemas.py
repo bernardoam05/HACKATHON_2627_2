@@ -103,6 +103,13 @@ def test_decision_run_info_is_optional_and_validated():
     f = RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta", "fallbacks": [
         {"model": "a", "error": "ModelUnavailableError 503", "ms": 1200}]})
     assert f.fallbacks[0].model == "a" and f.fallbacks[0].ms == 1200
+    assert f.inputTokens is None and f.outputTokens is None  # provider reported none / old rows
+    t = RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta",
+                                "inputTokens": 3200, "outputTokens": 410})
+    assert (t.inputTokens, t.outputTokens) == (3200, 410)
+    with pytest.raises(ValidationError):
+        RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta",
+                                "inputTokens": -1})
     with pytest.raises(ValidationError):
         RunInfo.model_validate({"durationMs": 9, "tier": "fast", "mode": "delta",
                                 "fallbacks": [{"model": "a", "error": "x", "ms": -1}]})

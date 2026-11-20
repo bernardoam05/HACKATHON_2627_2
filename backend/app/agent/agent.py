@@ -83,6 +83,9 @@ MAX_MODEL_REQUESTS = 4  # legit runs need 1-2 (e.g. routine stats + answer); wor
 # Per model request: a model slower than this (overloaded) counts as failed and the chain moves
 # on, instead of a chat waiting a minute or more for one answer.
 REQUEST_TIMEOUT: ModelSettings = {"timeout": 25}
+# Reasoning chain only (chat, startup, wake-ups): start the next models in parallel when the
+# current attempt has not answered after this long. 0 disables hedging.
+HEDGE_AFTER_SECONDS = 8.0
 NO_TOOLS_NOTE = (
     "\n\nThis is a quick reaction run: no tools are available. Everything you need is above "
     "(changes, devices in the affected rooms, expected behaviours). Decide now."
@@ -95,6 +98,10 @@ MAX_RETRY_AFTER = 30.0  # honour the provider's Retry-After, but never block run
 TRANSIENT_HTTP = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
+class ModelSkipped(ModelAPIError):
+    """A chain member the circuit breaker skipped without calling it."""
+
+
 def is_transient_llm_error(exc: BaseException) -> bool:
     """Worth retrying: overloaded/rate-limited provider or network trouble.
     Not retried: bad key (401/403), unknown model, invalid request, our own bugs, and an
@@ -102,6 +109,8 @@ def is_transient_llm_error(exc: BaseException) -> bool:
     A FallbackModel raises a group with one error per model: transient if any of them is."""
     if isinstance(exc, BaseExceptionGroup):
         return any(is_transient_llm_error(e) for e in exc.exceptions)
+    if isinstance(exc, ModelSkipped):  # the breaker skipped it: says nothing about the provider
+        return False
     if isinstance(exc, ModelQuotaExceededError):
         return getattr(exc, "retry_after", None) is not None  # per-minute limit: yes; plan: no
     if isinstance(exc, ModelUnavailableError):
@@ -133,9 +142,7 @@ AUTO_MODELS: tuple[str, ...] = (
     "google:gemini-3.1-flash-lite",
     "google:gemini-3.8-flash",
     "google:gemini-3.6-flash",
-    "google:gemini-3-flash",
-    "google:gemini-2.5-flash",
-)
+)  # gemini-3-flash removed: it answered 404 on every run (telemetry), costing 1-5 s each time
 
 
 # Models that failed during the current run (filled by _TimedModel, read by _log_run). Runs are
@@ -155,9 +162,16 @@ def _log_run(
         responses = []
     tools = [p.tool_name for m in responses for p in m.parts if isinstance(p, ToolCallPart)]
     models = sorted({m.model_name for m in responses if m.model_name})
-    log.info("agent run done (%s) in %.1fs: %d model requests via %s, tools=%s",
-             trigger.value, seconds, len(responses), ",".join(models) or "?", tools)
+    try:
+        usage = result.usage
+        in_tok, out_tok = int(usage.input_tokens or 0) or None, int(usage.output_tokens or 0) or None
+    except Exception:  # noqa: BLE001 - a provider that reports no usage
+        in_tok = out_tok = None
+    log.info("agent run done (%s) in %.1fs: %d model requests via %s, tokens in/out=%s/%s, tools=%s",
+             trigger.value, seconds, len(responses), ",".join(models) or "?", in_tok, out_tok, tools)
     return RunInfo(
+        inputTokens=in_tok,
+        outputTokens=out_tok,
         durationMs=round(seconds * 1000),
         model=",".join(models) or None,
         tier="reasoning" if tier == "reasoning" else "fast",
@@ -173,8 +187,6 @@ def _log_run(
 AUTO_REASONING_MODELS: tuple[str, ...] = (
     "google:gemini-3.8-flash",
     "google:gemini-3.6-flash",
-    "google:gemini-3-flash",
-    "google:gemini-2.5-flash",
     "google:gemini-3.5-flash-lite",
     "google:gemini-3.1-flash-lite",
 )
@@ -260,7 +272,7 @@ def _make_model(name: str) -> Model | str:
     return infer_model(name)
 
 
-def build_model(spec: str | list[str]) -> Model | str:
+def build_model(spec: str | list[str], hedge_after: float = 0) -> Model | str:
     """One name -> that model. Several -> FallbackModel: on any API error (503 overloaded,
     429 quota, network, no credit) the next model is tried at once; each model has its own
     quota. Models whose key is missing are left out of the chain (logged); with none left
@@ -280,21 +292,117 @@ def build_model(spec: str | list[str]) -> Model | str:
         return names[0]
     if len(models) == 1:
         return models[0]
-    return FallbackModel(*[_TimedModel(m) for m in models])
+    last = len(models) - 1
+    timed = [_TimedModel(m, skippable=i < last) for i, m in enumerate(models)]
+    if hedge_after and len(timed) >= 3:
+        return HedgedFallbackModel(*timed, hedge_after=hedge_after)
+    return FallbackModel(*timed)
+
+
+# Models already tried (or in flight) in the current hedged request, shared by both racers, so
+# no model is called twice for the same request. None outside a hedged request.
+_CLAIMED: ContextVar[set[str] | None] = ContextVar("claimed_models", default=None)
+
+
+class HedgedFallbackModel(FallbackModel):
+    """FallbackModel that does not wait for a slow model to fail. The chain starts as usual; when
+    the current attempt has not answered after `hedge_after` seconds, a second walk of the chain
+    is started in parallel and the first answer wins, the other request is cancelled. The two
+    walks share a set of claimed models (see `_TimedModel`): each model is called at most once
+    per request, so the hedge picks up at the first model nobody has tried yet and the primary
+    skips what the hedge took. It costs extra quota only in the slow case, and a slow model is
+    exactly where the sequential chain loses 25 s on the request timeout."""
+
+    def __init__(self, *models: Model, hedge_after: float) -> None:
+        super().__init__(*models)
+        self._hedge_after = hedge_after
+
+    async def request(self, messages: Any, model_settings: Any, model_request_parameters: Any
+                      ) -> ModelResponse:
+        token = _CLAIMED.set(set())  # both tasks below copy this context, so share the set
+        try:
+            return await self._race(messages, model_settings, model_request_parameters)
+        finally:
+            _CLAIMED.reset(token)
+
+    async def _race(self, messages: Any, model_settings: Any, model_request_parameters: Any
+                    ) -> ModelResponse:
+        primary = asyncio.ensure_future(
+            super().request(messages, model_settings, model_request_parameters))
+        done, _ = await asyncio.wait({primary}, timeout=self._hedge_after)
+        if done:
+            return primary.result()
+        log.info("chain attempt still running after %.0fs: hedging with the next models",
+                 self._hedge_after)
+        hedge = asyncio.ensure_future(
+            super().request(messages, model_settings, model_request_parameters))
+        pending = {primary, hedge}
+        first_error: BaseException | None = None
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if task.exception() is None:
+                        return task.result()
+                    first_error = first_error or task.exception()
+            assert first_error is not None
+            raise first_error
+        finally:
+            for task in (primary, hedge):
+                if not task.done():
+                    task.cancel()
+
+
+# Circuit breaker: a model that just failed for a reason that will not go away in seconds is
+# skipped (instantly, no network) instead of costing the next run its full failure time again.
+# Seconds to skip by HTTP status; anything else (timeout, 503, network) gets the short default.
+BREAKER_SECONDS: dict[int, float] = {401: 3600, 403: 3600, 404: 3600, 400: 300, 413: 1800, 429: 60}
+BREAKER_DEFAULT_SECONDS = 30.0
+_BREAKER: dict[str, float] = {}  # model name -> time.monotonic() until which it is skipped
+
+
+def breaker_open(name: str) -> bool:
+    until = _BREAKER.get(name)
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        del _BREAKER[name]
+        return False
+    return True
+
+
+def breaker_trip(name: str, exc: BaseException) -> None:
+    status = getattr(exc, "status_code", None)
+    seconds = BREAKER_SECONDS.get(status, BREAKER_DEFAULT_SECONDS) if status else \
+        BREAKER_DEFAULT_SECONDS
+    if status == 429:
+        seconds = max(seconds, _retry_after(exc) or 0)
+    _BREAKER[name] = time.monotonic() + seconds
 
 
 class _TimedModel(WrapperModel):
     """A chain member that logs its failures with how long they took, so a slow fallback (which
-    model failed, why, how long it cost) is visible in the backend log."""
+    model failed, why, how long it cost) is visible in the backend log. With `skippable`, a model
+    that failed recently is skipped through the circuit breaker; the last model of a chain is
+    never skippable, so a chain always tries at least one model."""
 
-    def __init__(self, model: Model | str) -> None:
+    def __init__(self, model: Model | str, skippable: bool = False) -> None:
         super().__init__(infer_model(model) if isinstance(model, str) else model)
+        self._skippable = skippable
 
     async def request(self, messages: Any, model_settings: Any, params: Any) -> ModelResponse:
+        if self._skippable and breaker_open(self.model_name):
+            raise ModelSkipped(self.model_name, "skipped: failed recently (circuit breaker)")
+        claimed = _CLAIMED.get()
+        if claimed is not None:  # hedged request: the other racer already took this model
+            if self.model_name in claimed:
+                raise ModelSkipped(self.model_name, "skipped: already tried for this request")
+            claimed.add(self.model_name)
         started = time.monotonic()
         try:
             return await super().request(messages, model_settings, params)
         except Exception as e:
+            breaker_trip(self.model_name, e)
             elapsed = time.monotonic() - started
             log.info("model %s failed after %.1fs: %s %s", self.model_name,
                      elapsed, type(e).__name__, str(e)[:160])
@@ -463,7 +571,8 @@ class HomeAgent:
         # Two tiers: `fast` for everyday reactions, `reasoning` for chat, startup/daily review and
         # wake-ups. Tests may inject one model (both tiers) or both.
         fast = model or build_model(fast_names(settings))
-        reasoning = reasoning_model or model or build_model(reasoning_names(settings))
+        reasoning = reasoning_model or model or build_model(
+            reasoning_names(settings), hedge_after=HEDGE_AFTER_SECONDS)
         self._model_name = (
             f"{model}" if model and not reasoning_model else
             f"fast={','.join(fast_names(settings))}; "
