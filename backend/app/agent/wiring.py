@@ -25,7 +25,14 @@ from app.schemas import AgentStatusMsg, DeviceSource
 from app.storage.db import init_db
 from app.storage.repository import Repository
 
-from .agent import Clock, HomeAgent, build_model, model_names
+from .agent import (
+    Clock,
+    HomeAgent,
+    build_model,
+    expand_spec,
+    model_names,
+    reasoning_names,
+)
 from .executor import Executor
 from .feedback import FeedbackService
 from .insights import InsightEngine
@@ -66,21 +73,30 @@ PROVIDER_KEY_ENV = {
 }
 
 
+def _provider(name: str) -> str:
+    return name.split(":", 1)[0] if ":" in name else ""
+
+
 def export_agent_api_key(settings: Settings) -> str | None:
-    """Make AGENT_API_KEY visible to the provider SDK(s) of AGENT_MODEL (one model, a list or
-    `auto`). A variable already set in the real environment wins. Returns the env var names
-    used, comma-separated (None if nothing to do)."""
-    if not settings.AGENT_API_KEY:
-        return None
+    """Make the keys visible to the provider SDKs: AGENT_API_KEY for the providers of AGENT_MODEL,
+    AGENT_REASONING_API_KEY (or AGENT_API_KEY) for the other providers of the reasoning chain
+    (e.g. Gemini fast + OpenAI reasoning). A variable already set in the real environment wins.
+    Returns the env var names used, comma-separated (None if nothing to do)."""
+    fast = {_provider(n) for n in model_names(settings.AGENT_MODEL)}
+    keys: dict[str, str] = {p: settings.AGENT_API_KEY for p in fast}
+    reasoning_key = settings.AGENT_REASONING_API_KEY or settings.AGENT_API_KEY
+    for name in expand_spec(settings.AGENT_MODEL_REASONING) + reasoning_names(settings):
+        keys.setdefault(_provider(name), reasoning_key)
     exported: list[str] = []
-    for name in model_names(settings.AGENT_MODEL):
-        provider = name.split(":", 1)[0] if ":" in name else ""
+    for provider, key in keys.items():
+        if not key:
+            continue
         var = PROVIDER_KEY_ENV.get(provider)
         if var is None:
-            log.warning("AGENT_API_KEY set but provider %r is unknown; export its key yourself",
+            log.warning("an API key is set but provider %r is unknown; export its key yourself",
                         provider)
             continue
-        os.environ.setdefault(var, settings.AGENT_API_KEY)
+        os.environ.setdefault(var, key)
         if var not in exported:
             exported.append(var)
     return ",".join(exported) or None
@@ -90,8 +106,10 @@ async def build_services(
     settings: Settings,
     clients: dict[DeviceSource, McpClient] | None = None,
     model: Any = None,
+    reasoning_model: Any = None,
 ) -> Services:
-    """Real services. `clients`/`model` are injectable for tests.
+    """Real services. `clients`/`model`/`reasoning_model` are injectable for tests (`model`
+    alone serves both tiers).
 
     Extra attributes on the returned container: `poller`, `scheduler`, `repo`, `aclose()`.
     """
@@ -112,7 +130,7 @@ async def build_services(
 
     rooms = RoomStore(repo)
     registry = DeviceRegistry(repo, rooms, clients)
-    onboarding = Onboarding(model or build_model(settings.AGENT_MODEL))
+    onboarding = Onboarding(reasoning_model or model or build_model(reasoning_names(settings)))
     plugins = PluginRegistry(repo, devices=registry.list_devices, proposer=onboarding.propose)
     broadcast = broadcaster.broadcast
     clock = Clock(settings.NOW_OVERRIDE, settings.TIMEZONE)
@@ -134,6 +152,7 @@ async def build_services(
     agent = HomeAgent(
         settings, registry, repo, plugins, rooms, executor, broadcast,
         insights=insights, reflexes=reflexes, feedback=feedback, clock=clock, model=model,
+        reasoning_model=reasoning_model,
     )
     presence = PresenceWatcher(registry, repo, settings.EMPTY_AFTER_MINUTES * 60, agent.wake)
 

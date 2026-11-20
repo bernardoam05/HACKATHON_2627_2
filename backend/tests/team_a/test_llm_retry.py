@@ -120,7 +120,7 @@ async def test_whole_chain_failing_transiently_is_retried():
 def test_exported_key_for_auto(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "placeholder")
     monkeypatch.delenv("GEMINI_API_KEY")
-    assert export_agent_api_key(Settings(AGENT_MODEL="auto", AGENT_API_KEY="k")) == "GEMINI_API_KEY"
+    assert export_agent_api_key(Settings(_env_file=None, AGENT_MODEL="auto", AGENT_API_KEY="k")) == "GEMINI_API_KEY"
     assert os.environ["GEMINI_API_KEY"] == "k"
 
 

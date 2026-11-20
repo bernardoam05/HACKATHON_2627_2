@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -24,8 +26,10 @@ from pydantic_ai.exceptions import (
     UsageLimitExceeded,
 )
 from pydantic_ai.messages import ModelResponse, ToolCallPart
-from pydantic_ai.models import Model
+from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.fallback import FallbackModel
+from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from app.config import Settings
@@ -73,6 +77,9 @@ LLM_RETRY_DELAYS: tuple[float, ...] = (2, 5, 15)
 # Hard cap on model round-trips per run (tool calls + final answer). Without it a weak model can
 # loop on tools for minutes (seen: 19 calls / 352 s at startup) while the house waits.
 MAX_MODEL_REQUESTS = 4  # legit runs need 1-2 (e.g. routine stats + answer); worst case 4 + 1
+# Per model request: a model slower than this (overloaded) counts as failed and the chain moves
+# on, instead of a chat waiting a minute or more for one answer.
+REQUEST_TIMEOUT: ModelSettings = {"timeout": 25}
 NO_TOOLS_NOTE = (
     "\n\nThis is a quick reaction run: no tools are available. Everything you need is above "
     "(changes, devices in the affected rooms, expected behaviours). Decide now."
@@ -140,20 +147,137 @@ def _log_run(trigger: DecisionTrigger, seconds: float, result: Any) -> None:
              trigger.value, seconds, len(responses), ",".join(models) or "?", tools)
 
 
+# AGENT_MODEL_REASONING=auto-reasoning: the Flash models first (they reason better: in the eval
+# they acted on situations no rule covers), then the Flash Lite ones as a reserve when the small
+# Flash quota (5 RPM / 20 RPD each) runs out, so a reasoning run never finds no model.
+AUTO_REASONING_MODELS: tuple[str, ...] = (
+    "google:gemini-3.8-flash",
+    "google:gemini-3.6-flash",
+    "google:gemini-3-flash",
+    "google:gemini-2.5-flash",
+    "google:gemini-3.5-flash-lite",
+    "google:gemini-3.1-flash-lite",
+)
+
+
 def model_names(spec: str) -> list[str]:
-    """AGENT_MODEL: one model, a comma-separated fallback list, or `auto`."""
-    if spec.strip().lower() == "auto":
+    """One model, a comma-separated fallback list, `auto` or `auto-reasoning`."""
+    key = spec.strip().lower()
+    if key == "auto":
         return list(AUTO_MODELS)
+    if key == "auto-reasoning":
+        return list(AUTO_REASONING_MODELS)
     return [m.strip() for m in spec.split(",") if m.strip()]
 
 
-def build_model(spec: str) -> Model | str:
+# "<provider>:" alone (e.g. AGENT_MODEL_REASONING=groq:) expands to these, best first. Free tiers
+# limit each model separately, so every extra model is extra headroom.
+DEFAULT_PROVIDER_MODELS: dict[str, tuple[str, ...]] = {
+    "openai": ("openai:gpt-5.4-mini", "openai:gpt-5-mini"),
+    "groq": ("groq:openai/gpt-oss-120b", "groq:qwen/qwen3.8-27b", "groq:openai/gpt-oss-20b"),
+}
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"  # OpenAI-compatible endpoint
+
+
+def expand_spec(spec: str) -> list[str]:
+    """model_names, with "<provider>:" alone (or a "<placeholder>") -> that provider's defaults."""
+    names: list[str] = []
+    for name in model_names(spec):
+        provider, sep, model = name.partition(":")
+        if sep and (not model or model.startswith("<")):
+            names += DEFAULT_PROVIDER_MODELS.get(provider, (name,))
+        else:
+            names.append(name)
+    return names
+
+
+def _fast_base(settings: Settings, reasoning_order: bool) -> list[str]:
+    auto = settings.AGENT_MODEL.strip().lower() == "auto"
+    return model_names(("auto-reasoning" if reasoning_order else "auto") if auto
+                       else settings.AGENT_MODEL)
+
+
+def reasoning_names(settings: Settings) -> list[str]:
+    """Reasoning chain: AGENT_MODEL_REASONING (or Gemini Flash first when AGENT_MODEL=auto),
+    then the whole fast chain as fallback, so a reasoning run always finds a model (e.g. Groq
+    rate-limited -> Gemini Flash -> Lite). Duplicates removed, order kept."""
+    names = expand_spec(settings.AGENT_MODEL_REASONING) + _fast_base(settings, True)
+    return list(dict.fromkeys(names))
+
+
+def fast_names(settings: Settings) -> list[str]:
+    """Fast chain: AGENT_MODEL, then the reasoning provider's models as a last resort, so
+    reactions keep working when the free Gemini quota of the day runs out."""
+    names = _fast_base(settings, False) + expand_spec(settings.AGENT_MODEL_REASONING)
+    return list(dict.fromkeys(names))
+
+
+def _make_model(name: str) -> Model | str:
+    """Groq through its OpenAI-compatible API (the `groq` SDK is not a dependency); the rest
+    through pydantic-ai's own inference. Raises when the provider's key is missing."""
+    provider, _, model = name.partition(":")
+    if provider == "groq" and importlib.util.find_spec("groq") is None:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        key = os.environ.get("GROQ_API_KEY")
+        if not key:
+            raise ValueError("GROQ_API_KEY not set")
+        # No SDK-level retries: a 429 (per-minute limit) moves the FallbackModel to the next
+        # model at once instead of waiting inside the client.
+        from openai import AsyncOpenAI
+
+        provider_ = OpenAIProvider(openai_client=AsyncOpenAI(
+            base_url=GROQ_BASE_URL, api_key=key, max_retries=0, timeout=60))
+        profile = OpenAIChatModel(model, provider=provider_).profile
+        # Groq rejects (400 tool_use_failed) when gpt-oss answers in text instead of calling the
+        # output tool, and refuses JSON mode together with tools (chat). So the decision schema
+        # goes in the prompt and comes back as plain-text JSON, validated (and retried) by us.
+        return OpenAIChatModel(model, provider=provider_, profile={
+            **profile, "default_structured_output_mode": "prompted",
+            "supports_json_schema_output": False, "supports_json_object_output": False,
+        })
+    return infer_model(name)
+
+
+def build_model(spec: str | list[str]) -> Model | str:
     """One name -> that model. Several -> FallbackModel: on any API error (503 overloaded,
-    429 quota, network) the next model is tried at once; each Gemini model has its own quota."""
-    names = model_names(spec)
-    if len(names) <= 1:
-        return names[0] if names else spec
-    return FallbackModel(*names)
+    429 quota, network, no credit) the next model is tried at once; each model has its own
+    quota. Models whose key is missing are left out of the chain (logged); with none left
+    (tests, CI) it degrades to the first name, resolved lazily."""
+    names = model_names(spec) if isinstance(spec, str) else list(spec)
+    if not names:
+        return str(spec)
+    if len(names) == 1 and not names[0].startswith("groq:"):
+        return names[0]
+    models: list[Model | str] = []
+    for name in names:
+        try:
+            models.append(_make_model(name))
+        except Exception as e:  # missing API key / SDK: skip it, keep the rest of the chain
+            log.warning("model %s left out of the chain (%s)", name, e)
+    if not models:
+        return names[0]
+    if len(models) == 1:
+        return models[0]
+    return FallbackModel(*[_TimedModel(m) for m in models])
+
+
+class _TimedModel(WrapperModel):
+    """A chain member that logs its failures with how long they took, so a slow fallback (which
+    model failed, why, how long it cost) is visible in the backend log."""
+
+    def __init__(self, model: Model | str) -> None:
+        super().__init__(infer_model(model) if isinstance(model, str) else model)
+
+    async def request(self, messages: Any, model_settings: Any, params: Any) -> ModelResponse:
+        started = time.monotonic()
+        try:
+            return await super().request(messages, model_settings, params)
+        except Exception as e:
+            log.info("model %s failed after %.1fs: %s %s", self.model_name,
+                     time.monotonic() - started, type(e).__name__, str(e)[:160])
+            raise
 
 
 class WakeUp(BaseModel):
@@ -164,12 +288,12 @@ class WakeUp(BaseModel):
 class AgentOutput(BaseModel):
     """What the LLM returns. Ids, timestamps and trigger are filled in by code."""
 
-    explanation: str = Field(description="Short user-facing explanation in PT-PT")
+    explanation: str = Field(description="Short user-facing explanation in PT-PT; describes only the actions you return")
     inferredRoom: str | None = None
     inferredActivity: str | None = None
     actions: list[ProposedAction] = []
     confidence: float = Field(default=0.5, ge=0, le=1)
-    beliefState: str = Field(description="Your updated belief state, <= ~800 chars")
+    beliefState: str = Field(description="Your updated belief state in PT-PT, <= ~800 chars")
     insightUpdates: list[InsightUpdate] = []
     reflexProposals: list[ReflexDraft] = []
     reflexUpdates: list[ReflexUpdateDraft] = []
@@ -291,6 +415,7 @@ class HomeAgent:
         feedback: FeedbackService,
         clock: Clock | None = None,
         model: Model | str | None = None,
+        reasoning_model: Model | str | None = None,
     ) -> None:
         self._settings = settings
         self._registry = registry
@@ -306,23 +431,32 @@ class HomeAgent:
             repo, settings.FULL_SNAPSHOT_EVERY_RUNS, settings.FULL_SNAPSHOT_EVERY_SECONDS
         )
         self.clock = clock or Clock(settings.NOW_OVERRIDE, settings.TIMEZONE)
-        self._model_name = str(model) if model else ",".join(model_names(settings.AGENT_MODEL))
+        # Two tiers: `fast` for everyday reactions, `reasoning` for chat, startup/daily review and
+        # wake-ups. Tests may inject one model (both tiers) or both.
+        fast = model or build_model(fast_names(settings))
+        reasoning = reasoning_model or model or build_model(reasoning_names(settings))
+        self._model_name = (
+            f"{model}" if model and not reasoning_model else
+            f"fast={','.join(fast_names(settings))}; "
+            f"reasoning={','.join(reasoning_names(settings))}"
+        )
+        text = instructions(settings.REFLEX_MIN_CONFIDENCE)
+        # Chat: reasoning model with the read-only tools.
         self._agent: Agent[AgentDeps, AgentOutput] = Agent(
-            model or build_model(settings.AGENT_MODEL),
-            deps_type=AgentDeps,
-            output_type=AgentOutput,
-            instructions=instructions(settings.REFLEX_MIN_CONFIDENCE),
-            defer_model_check=True,
-            retries=2,
+            reasoning, deps_type=AgentDeps, output_type=AgentOutput, instructions=text,
+            defer_model_check=True, retries=2, model_settings=REQUEST_TIMEOUT,
         )
         register_tools(self._agent)
-        # Same model and instructions, no tools: used when a run hits MAX_MODEL_REQUESTS, so the
-        # agent still decides instead of the run failing (one extra request).
+        # No tools (everything is in the prompt): plain reactions on the fast model...
         self._final_agent: Agent[None, AgentOutput] = Agent(
-            model or build_model(settings.AGENT_MODEL),
-            output_type=AgentOutput,
-            instructions=instructions(settings.REFLEX_MIN_CONFIDENCE),
-            defer_model_check=True,
+            fast, output_type=AgentOutput, instructions=text, defer_model_check=True, retries=1,
+            model_settings=REQUEST_TIMEOUT,
+        )
+        # ...and automatic runs that need thinking (startup, daily review, wake-ups), plus the
+        # forced answer after a chat that used up its tool calls.
+        self._reasoning_agent: Agent[None, AgentOutput] = Agent(
+            reasoning, output_type=AgentOutput, instructions=text, defer_model_check=True,
+            model_settings=REQUEST_TIMEOUT,
             retries=1,
         )
         self._lock = asyncio.Lock()  # one LLM run at a time (state runs and chat)
@@ -426,13 +560,18 @@ class HomeAgent:
             # event or wake-up, routine stats at startup / routine wake-ups) and decide in one
             # request. Only chat keeps the tools, for questions the prompt cannot anticipate.
             use_tools = trigger == DecisionTrigger.chat
+            # Reasoning tier: chat, startup, and every wake-up (door check, schedules, daily
+            # review): few per day, and where thinking matters. Plain reactions stay fast.
+            reasoning = trigger != DecisionTrigger.state_change or bool(wake_reasons)
             if not use_tools:
                 prompt += NO_TOOLS_NOTE
             started = time.monotonic()
-            log.info("agent run started (%s, %s mode, %d changes, tools=%s)",
-                     trigger.value, run_input.mode, len(changes), use_tools)
+            log.info("agent run started (%s, %s mode, %d changes, tools=%s, tier=%s)",
+                     trigger.value, run_input.mode, len(changes), use_tools,
+                     "reasoning" if reasoning else "fast")
             try:
-                result = await self._run_llm(prompt, deps, use_tools=use_tools)
+                result = await self._run_llm(prompt, deps, use_tools=use_tools,
+                                             reasoning=reasoning)
             except BaseException as e:
                 log.info("agent run failed after %.1fs: %s", time.monotonic() - started,
                          type(e).__name__)
@@ -491,20 +630,22 @@ class HomeAgent:
                     routines.append({"name": d.alias or d.name, **stats})
         return presence, routines
 
-    async def _run_llm(self, prompt: str, deps: AgentDeps, use_tools: bool = True) -> Any:
+    async def _run_llm(
+        self, prompt: str, deps: AgentDeps, use_tools: bool = True, reasoning: bool = True
+    ) -> Any:
         """agent.run with retries on transient provider errors (503 overloaded, 429, network).
         Runs stay serialised meanwhile; changes arriving during the wait set the scheduler's
         dirty flag and are picked up by the next run (D5).
 
-        `use_tools=False` (plain delta runs): the prompt already carries the changes, the
-        devices of the affected rooms and their plugins, so one request decides."""
+        `use_tools=False`: the prompt already carries what the run needs, so one request
+        decides, on the reasoning model or (`reasoning=False`, plain reactions) the fast one.
+        Tool runs (chat) always use the reasoning model. Each model is a fallback chain."""
         attempts = len(self.retry_delays) + 1
         for attempt in range(1, attempts + 1):
             try:
                 if not use_tools:
-                    return await self._final_agent.run(
-                        prompt, usage_limits=UsageLimits(request_limit=2)
-                    )
+                    no_tools = self._reasoning_agent if reasoning else self._final_agent
+                    return await no_tools.run(prompt, usage_limits=UsageLimits(request_limit=2))
                 try:
                     return await self._agent.run(
                         prompt, deps=deps,
@@ -513,7 +654,7 @@ class HomeAgent:
                 except UsageLimitExceeded:
                     log.warning("agent used %d model requests without deciding; asking for the "
                                 "decision now, without tools", MAX_MODEL_REQUESTS)
-                    return await self._final_agent.run(
+                    return await self._reasoning_agent.run(
                         prompt + FORCE_ANSWER, usage_limits=UsageLimits(request_limit=2)
                     )
             except Exception as e:
@@ -571,6 +712,14 @@ class HomeAgent:
     ) -> Decision:
         belief = await self._belief.save(out.beliefState, run_input.mode, datetime.now(UTC))
         decision_id = uuid.uuid4().hex
+        # Actions on devices that do not exist (an invented "gateway") are dropped, not shown to
+        # the user as failed suggestions.
+        known = {d.id for d in await self._registry.list_devices()}
+        invented = [a.deviceId for a in out.actions if a.deviceId not in known]
+        if invented:
+            log.warning("decision %s: dropped actions on unknown devices %s", decision_id, invented)
+            out.actions = [a for a in out.actions if a.deviceId in known]
+        room_names = {room.id: room.name for room in run_input.rooms or []}
         touched = await self._insights.apply(out.insightUpdates, decision_id)
         proposals = await self._reflexes.accept_proposals(
             out.reflexProposals,
@@ -583,7 +732,7 @@ class HomeAgent:
             createdAt=datetime.now(UTC),
             trigger=trigger,
             explanation=out.explanation,
-            inferredRoom=out.inferredRoom,
+            inferredRoom=room_names.get(out.inferredRoom or "", out.inferredRoom),
             inferredActivity=out.inferredActivity,
             actions=out.actions,
             confidence=out.confidence,
