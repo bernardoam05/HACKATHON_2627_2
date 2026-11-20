@@ -6,6 +6,7 @@ from .agent import (
     Decision,
     DecisionTrigger,
     DoorEvent,
+    FallbackInfo,
     Insight,
     InsightStatus,
     InsightUpdate,
@@ -19,6 +20,7 @@ from .agent import (
     ReflexTrigger,
     ReflexUpdate,
     RoomMotion,
+    RunInfo,
     TimeWindow,
 )
 from .device import (
