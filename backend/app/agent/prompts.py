@@ -43,9 +43,9 @@ Rules:
   "reason"}. Use only capabilities the device has; respect min/max and availableValues; power is
   "on"/"off". Do not repeat what is already in effect or what a reflex just did ("reflex_executed").
 - Autonomy is per capability and enforced by the executor: some actions run at once, others only
-  become suggestions the user confirms (alarm, siren and camera recording always). So always put
-  the action in your actions, also when the user asks for something sensitive; in the
-  explanation say it awaits their confirmation instead of saying it is done.
+  become suggestions the user confirms (alarm, siren and camera recording always; see each
+  plugin's autonomy). So always put the action in your actions, also when the user asks for
+  something sensitive; in the explanation say you suggest it instead of saying it is done.
 - Devices under "Override cooldown" were just corrected by the user: leave them alone unless the
   user asks in chat.
 - You can never write to devices directly. Most runs have no tools: everything you need is in the
@@ -54,9 +54,9 @@ Rules:
 Empty house (D14). Presence facts are given after an entrance-door event or a wake-up. The house
 is "empty" ONLY if lastDoorEvent exists, motionAfterDoorEvent is false and
 secondsSinceLastDoorEvent >= emptyAfterSeconds; otherwise it is occupied or unknown. Silence alone
-never means empty (people sleep). When it is empty, switch off what wastes energy and suggest
-arming the alarm on the gateway ({"type": "securityStatus", "value": "away"}); do not repeat this
-until someone is back.
+never means empty (people sleep). When it is empty, switch off what wastes energy and, if a
+device has the securityStatus capability, suggest arming it ({"type": "securityStatus", "value":
+"away"}); do not repeat this until someone is back.
 
 Learning (D15). insightUpdates is how you remember what this household does:
 - {"op": "create", "statement", "delta": <initial confidence, default 0.4>, "evidence": [ids]}
@@ -93,26 +93,35 @@ Routines. You are only woken by changes, chat, schedules and wake-ups.
   under "Scheduled wake-ups". A user asking in chat for something at a time gets a time reflex.
 
 Output:
-- explanation: one or two short sentences in European Portuguese (PT-PT) saying what you did and
-  why, or what you understood if you did nothing.
+- Every action and reflex uses a deviceId that appears in this prompt; never invent one.
+- Everything the user sees is in European Portuguese (PT-PT): explanation, beliefState, insight
+  statements, reflex names and rationales, wake-up reasons.
+- explanation: one or two short sentences saying what you did and why, or what you understood if
+  you did nothing. It describes exactly your actions: never say you switched, dimmed or turned
+  something unless that action is in `actions`; for actions that need confirmation say you
+  suggest them. Refer to rooms and devices by name, never by id.
 - inferredRoom / inferredActivity: your best guess, or null. confidence: 0..1.
-- beliefState: ALWAYS rewrite it (max ~800 chars, English is fine): who is where, what is
-  happening, open hypotheses, what to remember next run.
+- beliefState: ALWAYS rewrite it (max ~800 chars, shown to the user as "what the house thinks"):
+  who is where, what is happening, open hypotheses, what to remember next run.
 """
 
 
-def room_of(d: Device) -> str | None:
-    """Our room assignment first, else the room name the source reports (sim/Altice)."""
-    return d.roomId or d.roomName
+def room_of(d: Device, names: dict[str, str] | None = None) -> str | None:
+    """Our room assignment first, else the room name the source reports (sim/Altice). With
+    `names` (room id -> name) our rooms are shown by name: the agent echoes what it sees in
+    user-facing fields (inferredRoom, explanation), and an id means nothing to the user."""
+    if d.roomId:
+        return (names or {}).get(d.roomId, d.roomId)
+    return d.roomName
 
 
-def _device_line(d: Device) -> dict[str, Any]:
+def _device_line(d: Device, names: dict[str, str] | None = None) -> dict[str, Any]:
     return {
         "id": d.id,
         "name": d.alias or d.name,
         "type": d.type,
         "source": d.source.value,
-        "room": room_of(d),
+        "room": room_of(d, names),
         "capabilities": {
             c.type: _cap(c.value, c.min, c.max, c.availableValues) for c in d.capabilities
         },
@@ -156,6 +165,7 @@ def build_prompt(
     list the devices of the affected rooms, so the agent can act without tool round-trips.
     """
     r = run_input
+    names = {room.id: room.name for room in r.rooms or []}
     by_id = {d.id: d for d in devices or []}
     sections: list[str] = [f"Mode: {r.mode}", f"Now (house local time): {r.now.isoformat()}"]
     if wake_reasons:
@@ -172,12 +182,12 @@ def build_prompt(
         )
 
     if r.snapshot is not None:
-        devices = [_device_line(d) for d in r.snapshot.devices if d.enabled]
+        devices = [_device_line(d, names) for d in r.snapshot.devices if d.enabled]
         sections.append("Full snapshot (enabled devices):\n" + _json(devices))
 
     def describe(device_id: str) -> dict[str, Any]:
         d = by_id.get(device_id)
-        return {"name": d.alias or d.name, "type": d.type, "room": room_of(d)} if d else {}
+        return {"name": d.alias or d.name, "type": d.type, "room": room_of(d, names)} if d else {}
 
     changes = [
         {
@@ -213,17 +223,17 @@ def build_prompt(
         # Wake-ups (door timer, routine) have no changes but may act on any room.
         sections.append(
             "All devices (current state):\n"
-            + _json([_device_line(d) for d in by_id.values() if d.enabled])
+            + _json([_device_line(d, names) for d in by_id.values() if d.enabled])
         )
     elif r.snapshot is None and by_id:
         changed = [by_id[c.deviceId] for c in r.changesSinceLastRun if c.deviceId in by_id]
-        rooms = {room_of(d) for d in changed if room_of(d)}
+        rooms = {room_of(d, names) for d in changed if room_of(d, names)}
         nearby = [d for d in by_id.values()
-                  if d.enabled and (room_of(d) in rooms or d in changed)]
+                  if d.enabled and (room_of(d, names) in rooms or d in changed)]
         if nearby:
             sections.append(
                 "Devices in the affected rooms (current state):\n"
-                + _json([_device_line(d) for d in nearby])
+                + _json([_device_line(d, names) for d in nearby])
             )
 
     if r.plugins:

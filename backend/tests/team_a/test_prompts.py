@@ -56,3 +56,17 @@ def test_wake_up_prompt_lists_every_device():
     listed = prompt.split("All devices (current state):\n", 1)[1]
     assert all(d.id in listed for d in HOUSE)
     assert "Presence facts" in prompt and "Devices in the affected rooms" not in prompt
+
+
+def test_rooms_are_shown_by_name_not_id():
+    """Our rooms have opaque ids; the agent must see names (it echoes them to the user)."""
+    from app.schemas import Room
+
+    light = dev("light-kitchen", "bulb", "", {"power": "on"}).model_copy(
+        update={"roomId": "c7c99e74ff0e", "roomName": None})
+    change = StateChange(id="c1", deviceId="light-kitchen", capability="power",
+                         old="off", new="on", at=NOW)
+    prompt = build_prompt(AgentRunInput(
+        mode="delta", changesSinceLastRun=[change], now=NOW,
+        rooms=[Room(id="c7c99e74ff0e", name="Cozinha")]), devices=[light])
+    assert '"room": "Cozinha"' in prompt and '"room": "c7c99e74ff0e"' not in prompt

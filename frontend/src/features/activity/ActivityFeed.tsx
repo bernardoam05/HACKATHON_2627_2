@@ -63,7 +63,7 @@ export default function ActivityFeed() {
     for (const a of all) byDecision.set(a.decisionId, [...(byDecision.get(a.decisionId) ?? []), a]);
     const known = new Set((decisions.data ?? []).map((d) => d.id));
     const list: Item[] = [
-      ...(decisions.data ?? []).map((d): Item =>
+      ...(decisions.data ?? []).filter((d) => !quietStartup(d)).map((d): Item =>
         ({ kind: "decision", at: d.createdAt, decision: d, actions: byDecision.get(d.id) ?? [] })),
       ...all.filter((a) => !known.has(a.decisionId))
         .map((a): Item => ({ kind: "action", at: a.createdAt, action: a })),
@@ -112,6 +112,12 @@ export default function ActivityFeed() {
       </Card>
     </div>
   );
+}
+
+/** A startup review that changed nothing ("no routine found") is not news for the user. */
+function quietStartup(d: Decision): boolean {
+  return d.trigger === "startup" && d.actions.length === 0 && d.insightUpdates.length === 0
+    && d.reflexProposals.length === 0 && d.reflexUpdates.length === 0;
 }
 
 function reasonFor(a: ActionRecord, decisions: Decision[] | undefined): string | undefined {
