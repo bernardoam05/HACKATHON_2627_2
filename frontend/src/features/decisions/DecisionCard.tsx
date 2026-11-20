@@ -2,6 +2,7 @@
 import type { Decision, DecisionTrigger } from "../../api/types";
 import { describeUpdate, useDeviceLabel } from "../../live/DevicesProvider";
 import { Badge } from "../../ui";
+import { FallbackList, RunInfoChip } from "./RunInfoChip";
 
 const TRIGGER_LABEL: Record<DecisionTrigger, string> = {
   state_change: "Mudança em casa",
@@ -10,8 +11,12 @@ const TRIGGER_LABEL: Record<DecisionTrigger, string> = {
   reflex_report: "Reflexo",
 };
 
-export function DecisionCard({ decision, showTrigger = true, showExplanation = true, showActions = true }:
-  { decision: Decision; showTrigger?: boolean; showExplanation?: boolean; showActions?: boolean }) {
+export function DecisionCard({
+  decision, showTrigger = true, showExplanation = true, showActions = true, showRunInfo = true,
+}: {
+  decision: Decision; showTrigger?: boolean; showExplanation?: boolean; showActions?: boolean;
+  showRunInfo?: boolean;
+}) {
   const label = useDeviceLabel();
   const { explanation, inferredRoom, inferredActivity, actions, confidence } = decision;
   return (
@@ -22,7 +27,10 @@ export function DecisionCard({ decision, showTrigger = true, showExplanation = t
         {inferredRoom && <Badge tone="accent">{inferredRoom}</Badge>}
         {inferredActivity && <Badge tone="accent">{inferredActivity}</Badge>}
         <span className="text-xs text-muted">Confiança {Math.round(confidence * 100)}%</span>
+        {showRunInfo && <RunInfoChip runInfo={decision.runInfo} />}
       </div>
+      {/* Shown wherever the card is (chat details, feed expansion): the chips are in the summary rows. */}
+      <FallbackList runInfo={decision.runInfo} />
       {showActions && actions.length > 0 && (
         <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
           {actions.map((a, i) => (
